@@ -1,0 +1,611 @@
+{
+  "schema_version": "1.0.0",
+  "total_frames": 75,
+  "fps": 25.0,
+  "pitch_dims": {
+    "length": 105.0,
+    "width": 68.0
+  },
+  "frames": [
+    {
+      "frame_idx": 0,
+      "t": 0.0,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 1,
+      "t": 0.04,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 2,
+      "t": 0.08,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 3,
+      "t": 0.12,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 4,
+      "t": 0.16,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 5,
+      "t": 0.2,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 6,
+      "t": 0.24,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 7,
+      "t": 0.28,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 8,
+      "t": 0.32,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 9,
+      "t": 0.36,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 10,
+      "t": 0.4,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 11,
+      "t": 0.44,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 12,
+      "t": 0.48,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 13,
+      "t": 0.52,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 14,
+      "t": 0.56,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 15,
+      "t": 0.6,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 16,
+      "t": 0.64,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 17,
+      "t": 0.68,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 18,
+      "t": 0.72,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 19,
+      "t": 0.76,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 20,
+      "t": 0.8,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 21,
+      "t": 0.84,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 22,
+      "t": 0.88,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 23,
+      "t": 0.92,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 24,
+      "t": 0.96,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 25,
+      "t": 1.0,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 26,
+      "t": 1.04,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 27,
+      "t": 1.08,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 28,
+      "t": 1.12,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 29,
+      "t": 1.16,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 30,
+      "t": 1.2,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 31,
+      "t": 1.24,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 32,
+      "t": 1.28,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 33,
+      "t": 1.32,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 34,
+      "t": 1.36,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 35,
+      "t": 1.4,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 36,
+      "t": 1.44,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 37,
+      "t": 1.48,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 38,
+      "t": 1.52,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 39,
+      "t": 1.56,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 40,
+      "t": 1.6,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 41,
+      "t": 1.64,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 42,
+      "t": 1.68,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 43,
+      "t": 1.72,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 44,
+      "t": 1.76,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 45,
+      "t": 1.8,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 46,
+      "t": 1.84,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 47,
+      "t": 1.88,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 48,
+      "t": 1.92,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 49,
+      "t": 1.96,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 50,
+      "t": 2.0,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 51,
+      "t": 2.04,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 52,
+      "t": 2.08,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 53,
+      "t": 2.12,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 54,
+      "t": 2.16,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 55,
+      "t": 2.2,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 56,
+      "t": 2.24,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 57,
+      "t": 2.28,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 58,
+      "t": 2.32,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 59,
+      "t": 2.36,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 60,
+      "t": 2.4,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 61,
+      "t": 2.44,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 62,
+      "t": 2.48,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 63,
+      "t": 2.52,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 64,
+      "t": 2.56,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 65,
+      "t": 2.6,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 66,
+      "t": 2.64,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 67,
+      "t": 2.68,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 68,
+      "t": 2.72,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 69,
+      "t": 2.76,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 70,
+      "t": 2.8,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 71,
+      "t": 2.84,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 72,
+      "t": 2.88,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 73,
+      "t": 2.92,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    },
+    {
+      "frame_idx": 74,
+      "t": 2.96,
+      "status": "no_pitch",
+      "conf": 0.0,
+      "source": "keypoints",
+      "footprint_m": null
+    }
+  ]
+}

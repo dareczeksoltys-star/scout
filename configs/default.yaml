@@ -1,0 +1,35 @@
+# PITCHLAB - Domyślna konfiguracja parametrów pipeline'u
+
+pitch:
+  length_m: 105.0
+  width_m: 68.0
+
+sampling:
+  dev_fps: 5          # Tryb dev: rzadsze próbkowanie klatek (oszczędność CPU)
+  gpu_fps: 25         # Tryb gpu: pełny klatkaż analizy
+
+camera_shots:
+  min_scene_length_sec: 1.0
+  green_hsv_lower: [35, 40, 40]
+  green_hsv_upper: [85, 255, 255]
+  main_view_green_ratio_min: 0.40
+
+calibration:
+  default_backend: "roboflow"
+  iou_threshold_reliable: 0.85
+  min_lines_detected: 4
+
+tracking:
+  conf_threshold: 0.35
+  ball_conf_threshold: 0.20
+  track_buffer_frames: 30
+
+kinematics:
+  max_speed_m_per_s: 12.0
+  max_accel_m_per_s2: 9.0
+
+gcp:
+  project_id: ""
+  storage_bucket: "pitchlab-data"
+  firestore_collection_matches: "matches"
+  firestore_collection_weights: "models/scoring_weights"
