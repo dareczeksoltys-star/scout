@@ -1,35 +1,28 @@
-# PITCHLAB - Domyślna konfiguracja parametrów pipeline'u
+version: "1.0"
 
-pitch:
-  length_m: 105.0
-  width_m: 68.0
+m6:
+  yolo:
+    weights: "yolov8x.pt"
+    conf_thresh: 0.25
+    iou_thresh: 0.45
+    imgsz: 1280
+    device: "cuda"
 
-sampling:
-  dev_fps: 5          # Tryb dev: rzadsze próbkowanie klatek (oszczędność CPU)
-  gpu_fps: 25         # Tryb gpu: pełny klatkaż analizy
+  sahi:
+    enabled: false
+    slice_height: 640
+    slice_width: 640
+    overlap_height_ratio: 0.2
+    overlap_width_ratio: 0.2
 
-camera_shots:
-  min_scene_length_sec: 1.0
-  green_hsv_lower: [35, 40, 40]
-  green_hsv_upper: [85, 255, 255]
-  main_view_green_ratio_min: 0.40
+  bytetrack:
+    track_thresh: 0.5
+    track_buffer: 30
+    match_thresh: 0.8
+    frame_rate: 25
 
-calibration:
-  default_backend: "roboflow"
-  iou_threshold_reliable: 0.85
-  min_lines_detected: 4
-
-tracking:
-  conf_threshold: 0.35
-  ball_conf_threshold: 0.20
-  track_buffer_frames: 30
-
-kinematics:
-  max_speed_m_per_s: 12.0
-  max_accel_m_per_s2: 9.0
-
-gcp:
-  project_id: ""
-  storage_bucket: "pitchlab-data"
-  firestore_collection_matches: "matches"
-  firestore_collection_weights: "models/scoring_weights"
+  kalman_ball:
+    process_noise: 1.0
+    measurement_noise: 10.0
+    max_dist_px: 150.0
+    max_missing_frames: 5

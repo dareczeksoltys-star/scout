@@ -1,0 +1,82 @@
+{
+  "segments": [
+    {
+      "id": "seg_536cff65",
+      "video_id": "videoplayback",
+      "video_name": "videoplayback.mp4",
+      "start_time": 19.05,
+      "end_time": 21.71,
+      "start_formatted": "00:19.05",
+      "end_formatted": "00:21.71",
+      "duration": 2.66,
+      "label": "Akcja bramkowa / Gol",
+      "notes": "",
+      "created_at": "2026-10-11T16:14:58.529909"
+    },
+    {
+      "id": "seg_27ff8403",
+      "video_id": "videoplayback",
+      "video_name": "videoplayback.mp4",
+      "start_time": 10.85,
+      "end_time": 13.31,
+      "start_formatted": "00:10.85",
+      "end_formatted": "00:13.31",
+      "duration": 2.46,
+      "label": "Akcja bramkowa / Gol",
+      "notes": "",
+      "created_at": "2026-10-11T16:49:50.537131"
+    },
+    {
+      "id": "seg_4829e925",
+      "video_id": "videoplayback",
+      "video_name": "videoplayback.mp4",
+      "start_time": 10.86,
+      "end_time": 15.21,
+      "start_formatted": "00:10.86",
+      "end_formatted": "00:15.21",
+      "duration": 4.35,
+      "label": "Akcja bramkowa / Gol",
+      "notes": "",
+      "created_at": "2026-10-11T17:35:02.557359"
+    },
+    {
+      "id": "seg_8815f7cb",
+      "video_id": "videoplayback",
+      "video_name": "videoplayback.mp4",
+      "start_time": 13.87,
+      "end_time": 15.53,
+      "start_formatted": "00:13.87",
+      "end_formatted": "00:15.53",
+      "duration": 1.66,
+      "label": "Akcja bramkowa / Gol",
+      "notes": "",
+      "created_at": "2026-10-11T17:40:44.209247"
+    },
+    {
+      "id": "seg_5d788253",
+      "video_id": "videoplayback",
+      "video_name": "videoplayback.mp4",
+      "start_time": 0.0,
+      "end_time": 22.74,
+      "start_formatted": "00:00.00",
+      "end_formatted": "00:22.74",
+      "duration": 22.74,
+      "label": "Akcja bramkowa / Gol",
+      "notes": "",
+      "created_at": "2026-10-11T17:40:50.671579"
+    },
+    {
+      "id": "seg_fcb92ca4",
+      "video_id": "videoplayback",
+      "video_name": "videoplayback.mp4",
+      "start_time": 15.94,
+      "end_time": 55.17,
+      "start_formatted": "00:15.94",
+      "end_formatted": "00:55.17",
+      "duration": 39.23,
+      "label": "Akcja bramkowa / Gol",
+      "notes": "",
+      "created_at": "2026-10-11T18:34:36.823866"
+    }
+  ]
+}

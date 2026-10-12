@@ -1,0 +1,17 @@
+{
+  "name": "pitchlab",
+  "version": "1.0.0",
+  "description": "Football Video Annotation MVP",
+  "scripts": {
+    "start": ".venv\\Scripts\\python.exe -m uvicorn pitchlab.server:app --host 127.0.0.1 --port 8000",
+    "start:reload": ".venv\\Scripts\\python.exe -m uvicorn pitchlab.server:app --host 127.0.0.1 --port 8000 --reload"
+  },
+  "keywords": [
+    "football",
+    "video",
+    "annotation",
+    "fastapi"
+  ],
+  "author": "",
+  "license": "ISC"
+}

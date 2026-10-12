@@ -32,6 +32,9 @@ dependencies = [
     "google-cloud-firestore>=2.15.0",
     "fastapi>=0.110.0",
     "uvicorn>=0.28.0",
+    "python-multipart>=0.0.9",
+    "ultralytics>=8.0.0",
+    "typer>=0.9.0",
 ]
 
 [project.optional-dependencies]

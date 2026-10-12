@@ -1,296 +1,311 @@
-# pitchlab/core/io.py
-"""
-I/O utilities for PitchLab.
-
-The module abstracts file access for the two primary storage back‑ends used by the
-application:
-
-* Local filesystem paths (e.g. ``/tmp/video.mp4``)
-* Google Cloud Storage URIs (``gs://bucket/path``)
-
-Only a small, well‑defined subset of functionality is required for the core
-pipeline at this stage – loading configuration files and reading video streams.
-All functions raise explicit, typed exceptions and perform basic validation to
-prevent path‑traversal attacks or accidental overwrites.
-"""
+"""Video I/O and Parquet serialization for PitchLab data types."""
 
 from __future__ import annotations
 
-import json
-import os
-import pathlib
-from typing import Any, Dict, Generator
+import logging
+from collections.abc import Iterator
+from dataclasses import asdict
+from pathlib import Path
+from types import TracebackType
 
-import yaml
-from pathvalidate import sanitize_filename
+import cv2
+import numpy as np
+import numpy.typing as npt
+import pandas as pd
 
+from .types import EntityClass, TeamAssignment, Track2D, WorldState
 
-# Optional GCS import – the package is listed as a dependency. Import lazily so
-# that the core library can be used without GCS credentials when only local
-# files are needed.
-try:
-    from google.cloud import storage
-except Exception:  # pragma: no cover – import guarded for environments without GCS.
-    storage = None  # type: ignore
+logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Helper utilities
-# ---------------------------------------------------------------------------
+# Explicit schemas preserve columns and types even for empty datasets.
+_TRACK_SCHEMA: dict[str, str] = {
+    "frame_idx": "int64",
+    "track_id": "int64",
+    "cls": "string",
+    "x1": "float64",
+    "y1": "float64",
+    "x2": "float64",
+    "y2": "float64",
+    "conf": "float64",
+    "visible": "bool",
+    "interpolated": "bool",
+}
 
-def _is_gs_path(path: str) -> bool:
-    """Return ``True`` if *path* is a ``gs://`` URI.
+_WORLD_SCHEMA: dict[str, str] = {
+    "frame_idx": "int64",
+    "t": "float64",
+    "entity_id": "int64",
+    "team": "string",
+    "cls": "string",
+    "x": "float64",
+    "y": "float64",
+    "vx": "float64",
+    "vy": "float64",
+    "ax": "float64",
+    "ay": "float64",
+    "visible": "bool",
+    "pos_sigma": "float64",
+    "schema_version": "string",
+}
 
-    The check is deliberately simple – a valid GCS URI must start with the
-    scheme ``gs://`` and contain at least a bucket name.
-    """
-    return path.startswith("gs://") and len(path) > 5
+_TEAM_SCHEMA: dict[str, str] = {
+    "track_id": "int64",
+    "team": "string",
+    "is_goalkeeper": "bool",
+    "confidence": "float64",
+}
 
-def _validate_local_path(path: str) -> pathlib.Path:
-    """Validate *path* as a safe local filesystem path.
-
-    The function resolves the path and ensures it is absolute.  It also guards
-    against ``..`` components that could escape a designated root directory.
-    For now the root is the repository base (``SCOUT``) but the logic can be
-    extended later.
-    """
-    p = pathlib.Path(path).expanduser().resolve()
-    # Ensure the path is inside the repository directory.
-    repo_root = pathlib.Path(os.getenv("SCOUT_ROOT", "c:/Users/admin/Desktop/SCOUT")).resolve()
-    if not str(p).startswith(str(repo_root)):
-        raise PermissionError(f"Access to path {p} is outside the allowed repository root.")
-    return p
-
-# ---------------------------------------------------------------------------
-# Configuration (YAML) handling
-# ---------------------------------------------------------------------------
-
-def read_yaml_config(path: str) -> Dict[str, Any]:
-    """Read a YAML configuration file from *path*.
-
-    Supports both local files and ``gs://`` URIs.
-    """
-    if _is_gs_path(path):
-        if storage is None:
-            raise RuntimeError("google-cloud-storage is not available in the current environment.")
-        client = storage.Client()
-        _, bucket_name, *blob_parts = path.split('/')
-        blob_name = "/".join(blob_parts)
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(blob_name)
-        raw = blob.download_as_text()
-    else:
-        p = _validate_local_path(path)
-        with p.open("r", encoding="utf-8") as f:
-            raw = f.read()
-    return yaml.safe_load(raw) or {}
-
-def write_yaml_config(data: Dict[str, Any], path: str, *, overwrite: bool = False) -> None:
-    """Write *data* as a YAML file to *path*.
-
-    Parameters
-    ----------
-    data:
-        Mapping to serialise.
-    path:
-        Destination – local or ``gs://``.
-    overwrite:
-        If ``False`` (default) the function will raise ``FileExistsError`` when a
-        local file already exists.  Overwrites are allowed for GCS objects.
-    """
-    yaml_str = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
-    if _is_gs_path(path):
-        if storage is None:
-            raise RuntimeError("google-cloud-storage is not available.")
-        client = storage.Client()
-        _, bucket_name, *blob_parts = path.split('/')
-        blob_name = "/".join(blob_parts)
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(blob_name)
-        blob.upload_from_string(yaml_str, content_type="application/x-yaml")
-    else:
-        p = _validate_local_path(path)
-        if p.exists() and not overwrite:
-            raise FileExistsError(f"File {p} already exists and overwrite=False.")
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with p.open("w", encoding="utf-8") as f:
-            f.write(yaml_str)
-
-# ---------------------------------------------------------------------------
-# Video handling
-# ---------------------------------------------------------------------------
-
-def open_video(path: str):
-    """Open a video file for reading.
-
-    Returns an ``cv2.VideoCapture`` object when OpenCV is installed.  For GCS
-    locations the function streams the file to a temporary local file first.
-    The caller is responsible for releasing the capture object.
-    """
-    try:
-        import cv2  # Imported lazily – optional dependency.
-    except ImportError as exc:  # pragma: no cover
-        raise RuntimeError("OpenCV (cv2) is required for video handling.") from exc
-
-    if _is_gs_path(path):
-        import tempfile
-        if storage is None:
-            raise RuntimeError("google-cloud-storage is required for GCS video access.")
-        client = storage.Client()
-        _, bucket_name, *blob_parts = path.split('/')
-        blob_name = "/".join(blob_parts)
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(blob_name)
-        with tempfile.NamedTemporaryFile(delete=False, suffix=pathlib.Path(blob_name).suffix) as tmp:
-            blob.download_to_filename(tmp.name)
-            tmp_path = tmp.name
-        cap = cv2.VideoCapture(tmp_path)
-    else:
-        p = _validate_local_path(path)
-        cap = cv2.VideoCapture(str(p))
-    if not cap.isOpened():
-        raise IOError(f"Failed to open video at {path}")
-    return cap
-
-# ---------------------------------------------------------------------------
-# JSON helpers
-# ---------------------------------------------------------------------------
-
-def read_json(path: str) -> Any:
-    """Read a JSON file from *path* (local or GCS)."""
-    if _is_gs_path(path):
-        if storage is None:
-            raise RuntimeError("google-cloud-storage not available.")
-        client = storage.Client()
-        _, bucket_name, *blob_parts = path.split('/')
-        blob_name = "/".join(blob_parts)
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(blob_name)
-        raw = blob.download_as_text()
-    else:
-        p = _validate_local_path(path)
-        with p.open("r", encoding="utf-8") as f:
-            raw = f.read()
-    return json.loads(raw)
-
-def write_json(data: Any, path: str, *, overwrite: bool = False) -> None:
-    """Write *data* to *path* as JSON."""
-    json_str = json.dumps(data, ensure_ascii=False, indent=2)
-    if _is_gs_path(path):
-        if storage is None:
-            raise RuntimeError("google-cloud-storage not available.")
-        client = storage.Client()
-        _, bucket_name, *blob_parts = path.split('/')
-        blob_name = "/".join(blob_parts)
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(blob_name)
-        blob.upload_from_string(json_str, content_type="application/json")
-    else:
-        p = _validate_local_path(path)
-        if p.exists() and not overwrite:
-            raise FileExistsError(f"File {p} already exists and overwrite=False.")
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with p.open("w", encoding="utf-8") as f:
-            f.write(json_str)
-
-# Provide explicit save_json alias/function as required by external modules
-def save_json(data: Any, path: str, *, overwrite: bool = False) -> None:
-    """Save data to path as JSON (alias for write_json)."""
-    write_json(data, path, overwrite=overwrite)
-
-# ---------------------------------------------------------------------------
-# PARQUET helper
-# ---------------------------------------------------------------------------
-
-def save_parquet(data: Any, path: str, *, overwrite: bool = False) -> None:
-    """Save data (pandas DataFrame or convertible object) to a parquet file (local or GCS)."""
-    try:
-        import pandas as pd
-    except ImportError as exc:
-        raise RuntimeError("Pandas is required for parquet handling.") from exc
-
-    if not isinstance(data, pd.DataFrame):
-        df = pd.DataFrame(data)
-    else:
-        df = data
-
-    if _is_gs_path(path):
-        if storage is None:
-            raise RuntimeError("google-cloud-storage not available.")
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".parquet") as tmp:
-            tmp_path = tmp.name
-        df.to_parquet(tmp_path, index=False)
-        
-        client = storage.Client()
-        _, bucket_name, *blob_parts = path.split('/')
-        blob_name = "/".join(blob_parts)
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(blob_name)
-        blob.upload_from_filename(tmp_path, content_type="application/octet-stream")
-        os.unlink(tmp_path)
-    else:
-        p = _validate_local_path(path)
-        if p.exists() and not overwrite:
-            raise FileExistsError(f"File {p} already exists and overwrite=False.")
-        p.parent.mkdir(parents=True, exist_ok=True)
-        df.to_parquet(str(p), index=False)
-
-# ---------------------------------------------------------------------------
-# CACHE helper
-# ---------------------------------------------------------------------------
-
-def resolve_local_cache(path: str) -> str:
-    """Ensure a given path (local or GCS) is available locally.
-    If it's a GCS URI, download it to a local cache path and return that path.
-    If it's already local, validate and return it as a string.
-    """
-    if _is_gs_path(path):
-        if storage is None:
-            raise RuntimeError("google-cloud-storage is required for GCS caching.")
-        import tempfile
-        client = storage.Client()
-        _, bucket_name, *blob_parts = path.split('/')
-        blob_name = "/".join(blob_parts)
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(blob_name)
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix=pathlib.Path(blob_name).suffix) as tmp:
-            tmp_path = tmp.name
-        blob.download_to_filename(tmp_path)
-        return tmp_path
-    else:
-        p = _validate_local_path(path)
-        return str(p)
-
-# ---------------------------------------------------------------------------
-# PIPELINE WRAPPER
-# ---------------------------------------------------------------------------
 
 class VideoReader:
-    """A context-manager wrapper around open_video that provides high-level 
-    access to frames and stream properties.
-    """
-    def __init__(self, path: str):
-        self.path = path
-        self.cap = open_video(path)
+    """Read zero-based video frames as OpenCV BGR arrays.
 
-    def read_frames(self) -> Generator[Any, None, None]:
-        """Generator that yields individual image frames from the video stream."""
-        while self.cap.isOpened():
-            ret, frame = self.cap.read()
-            if not ret:
+    iter_frames() starts at frame zero on each invocation and yields
+    (frame_index, frame) pairs. Sampling means retaining every Nth frame,
+    not targeting a particular frames-per-second rate.
+
+    Instances maintain a single capture cursor and are not thread-safe.
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self._capture = cv2.VideoCapture(str(self.path))
+        self._closed = False
+
+        if not self._capture.isOpened():
+            self._capture.release()
+            self._closed = True
+            raise OSError(f"Unable to open video: {self.path}")
+
+        self.fps = float(self._capture.get(cv2.CAP_PROP_FPS))
+        self.frame_count = int(self._capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.width = int(self._capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.height = int(self._capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        logger.debug(
+            "Opened video %s: %dx%d, %.3f FPS, %d frames",
+            self.path,
+            self.width,
+            self.height,
+            self.fps,
+            self.frame_count,
+        )
+
+    def _ensure_open(self) -> None:
+        """Raise if this reader has been closed."""
+        if self._closed or not self._capture.isOpened():
+            raise RuntimeError("VideoReader is closed")
+
+    def _seek(self, idx: int) -> None:
+        """Position the capture at a frame, reopening for a failed rewind."""
+        self._ensure_open()
+        if self._capture.set(cv2.CAP_PROP_POS_FRAMES, idx):
+            return
+
+        if idx != 0:
+            raise OSError(f"Unable to seek to frame {idx} in {self.path}")
+
+        self._capture.release()
+        self._capture = cv2.VideoCapture(str(self.path))
+        if not self._capture.isOpened():
+            self.close()
+            raise OSError(f"Unable to reopen video: {self.path}")
+
+    def iter_frames(
+        self,
+        sample_rate: int = 1,
+    ) -> Iterator[tuple[int, npt.NDArray[np.uint8]]]:
+        """Yield every sample_rate-th frame, starting at frame zero."""
+        if (
+            isinstance(sample_rate, bool)
+            or not isinstance(sample_rate, int)
+            or sample_rate <= 0
+        ):
+            raise ValueError("sample_rate must be a positive integer")
+
+        self._seek(0)
+        idx = 0
+        while True:
+            self._ensure_open()
+            if not self._capture.grab():
                 break
-            yield frame
+
+            if idx % sample_rate == 0:
+                success, frame = self._capture.retrieve()
+                if not success or frame is None:
+                    raise OSError(f"Unable to decode frame {idx} in {self.path}")
+                yield idx, frame
+
+            idx += 1
+
+    def get_frame(self, idx: int) -> npt.NDArray[np.uint8]:
+        """Read one frame by zero-based index.
+
+        Out-of-range or unreadable frames raise IndexError. Seeking accuracy
+        depends on the video format and OpenCV backend.
+        """
+        if isinstance(idx, bool) or not isinstance(idx, int) or idx < 0:
+            raise ValueError("idx must be a nonnegative integer")
+
+        self._ensure_open()
+        if self.frame_count > 0 and idx >= self.frame_count:
+            raise IndexError(f"Frame {idx} is outside the video")
+
+        self._seek(idx)
+        success, frame = self._capture.read()
+        if not success or frame is None:
+            raise IndexError(f"Unable to read frame {idx} in {self.path}")
+        return frame
 
     def close(self) -> None:
-        """Release the video capture resource."""
-        if self.cap and self.cap.isOpened():
-            self.cap.release()
+        """Release video resources; repeated calls are safe."""
+        if not self._closed:
+            self._capture.release()
+            self._closed = True
+            logger.debug("Closed video %s", self.path)
 
     def __enter__(self) -> VideoReader:
+        self._ensure_open()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         self.close()
 
-"""End of I/O utilities."""
+    def __iter__(self):
+        return self.iter_frames()
+
+
+def _dataframe(
+    records: list[dict[str, object]],
+    schema: dict[str, str],
+) -> pd.DataFrame:
+    """Construct a consistently typed DataFrame, including for empty input."""
+    return pd.DataFrame.from_records(records, columns=list(schema)).astype(schema)
+
+
+def _save_parquet(frame: pd.DataFrame, path: str | Path) -> None:
+    """Save a DataFrame without its index, creating parent directories."""
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(output_path, index=False)
+    logger.debug("Saved %d rows to %s", len(frame), output_path)
+
+
+def _load_parquet(path: str | Path, schema: dict[str, str]) -> pd.DataFrame:
+    """Read a Parquet file and verify its required columns."""
+    frame = pd.read_parquet(path)
+    missing = set(schema) - set(frame.columns)
+    if missing:
+        raise ValueError(
+            f"{path} is missing required columns: {', '.join(sorted(missing))}"
+        )
+    return frame.loc[:, list(schema)].astype(schema)
+
+
+def track2d_to_dataframe(tracks: list[Track2D]) -> pd.DataFrame:
+    """Convert tracks to rows with flattened bounding-box coordinates."""
+    records: list[dict[str, object]] = []
+    for track in tracks:
+        x1, y1, x2, y2 = track.bbox_xyxy
+        records.append(
+            {
+                "frame_idx": track.frame_idx,
+                "track_id": track.track_id,
+                "cls": EntityClass(track.cls).value,
+                "x1": x1,
+                "y1": y1,
+                "x2": x2,
+                "y2": y2,
+                "conf": track.conf,
+                "visible": track.visible,
+                "interpolated": track.interpolated,
+            }
+        )
+    return _dataframe(records, _TRACK_SCHEMA)
+
+
+def save_track2d_parquet(tracks: list[Track2D], path: str | Path) -> None:
+    """Save 2D tracks to Parquet."""
+    _save_parquet(track2d_to_dataframe(tracks), path)
+
+
+def load_track2d_parquet(path: str | Path) -> list[Track2D]:
+    """Load 2D tracks, restoring entity enums and bounding-box tuples."""
+    frame = _load_parquet(path, _TRACK_SCHEMA)
+    return [
+        Track2D(
+            frame_idx=int(row["frame_idx"]),
+            track_id=int(row["track_id"]),
+            cls=EntityClass(row["cls"]),
+            bbox_xyxy=(
+                float(row["x1"]),
+                float(row["y1"]),
+                float(row["x2"]),
+                float(row["y2"]),
+            ),
+            conf=float(row["conf"]),
+            visible=bool(row["visible"]),
+            interpolated=bool(row["interpolated"]),
+        )
+        for row in frame.to_dict(orient="records")
+    ]
+
+
+save_tracks_parquet = save_track2d_parquet
+load_tracks_parquet = load_track2d_parquet
+
+
+def save_worldstate_parquet(states: list[WorldState], path: str | Path) -> None:
+    """Save world states, preserving nullable team assignments."""
+    records = [asdict(state) for state in states]
+    _save_parquet(_dataframe(records, _WORLD_SCHEMA), path)
+
+
+def load_worldstate_parquet(path: str | Path) -> list[WorldState]:
+    """Load world states, converting missing team values to None."""
+    frame = _load_parquet(path, _WORLD_SCHEMA)
+    return [
+        WorldState(
+            frame_idx=int(row["frame_idx"]),
+            t=float(row["t"]),
+            entity_id=int(row["entity_id"]),
+            team=None if pd.isna(row["team"]) else str(row["team"]),
+            cls=str(row["cls"]),
+            x=float(row["x"]),
+            y=float(row["y"]),
+            vx=float(row["vx"]),
+            vy=float(row["vy"]),
+            ax=float(row["ax"]),
+            ay=float(row["ay"]),
+            visible=bool(row["visible"]),
+            pos_sigma=float(row["pos_sigma"]),
+            schema_version=str(row["schema_version"]),
+        )
+        for row in frame.to_dict(orient="records")
+    ]
+
+
+def save_teamassignment_parquet(
+    assignments: list[TeamAssignment],
+    path: str | Path,
+) -> None:
+    """Save team assignments to Parquet."""
+    records = [asdict(assignment) for assignment in assignments]
+    _save_parquet(_dataframe(records, _TEAM_SCHEMA), path)
+
+
+def load_teamassignment_parquet(path: str | Path) -> list[TeamAssignment]:
+    """Load team assignments from Parquet."""
+    frame = _load_parquet(path, _TEAM_SCHEMA)
+    return [
+        TeamAssignment(
+            track_id=int(row["track_id"]),
+            team=str(row["team"]),
+            is_goalkeeper=bool(row["is_goalkeeper"]),
+            confidence=float(row["confidence"]),
+        )
+        for row in frame.to_dict(orient="records")
+    ]

@@ -1,0 +1,42 @@
+# Python virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+
+# Testing & tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Heavy media & data directories
+data/raw/
+data/interim/
+data/out/
+data/videos/
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.webm
+*.zip
+
+# API keys and secrets
+openrouter key.txt
+*.key
+*.env
+.env.*

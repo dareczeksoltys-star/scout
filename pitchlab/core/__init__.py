@@ -1,1 +1,1 @@
-"""Core modules and data structures for PITCHLAB."""
+# pitchlab.core – shared types, configuration, and I/O utilities.
