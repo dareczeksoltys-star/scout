@@ -161,8 +161,17 @@
 
                 <!-- Toolbar -->
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <button class="btn btn-secondary" id="btn-reset-calib">🔄 Reset Kalibracji Homografii</button>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 6px; background: rgba(16, 23, 40, 0.6); padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12);">
+                            <label for="zone-preset-select" style="font-size: 12px; font-weight: 600; color: #94A3B8;">📐 Kalibracja ręczna / Tryb awaryjny:</label>
+                            <select id="zone-preset-select" style="background: #1E293B; color: #F8FAFC; border: 1px solid #334155; padding: 5px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer;">
+                                <option value="left_penalty_area" selected>🥅 Lewe Pole Karne (Zbliżenie FIFA)</option>
+                                <option value="full_pitch">⚽ Pełne Boisko (105m × 68m)</option>
+                                <option value="right_penalty_area">🥅 Prawe Pole Karne (Zbliżenie FIFA)</option>
+                                <option value="center_pitch">⭕ Środek Boiska (Koło środkowe)</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-secondary" id="btn-reset-calib">🔄 Reset Kalibracji</button>
                         <button class="btn btn-primary" id="btn-process-frame">⚡ Przetwórz Klatkę (Canvas CV)</button>
                         <button class="btn btn-secondary" id="btn-gemini-assist">✨ Gemini Flash Assist</button>
                     </div>
@@ -213,7 +222,7 @@
                             <canvas id="active-frame-canvas" width="640" height="360"></canvas>
                         </div>
                         <div class="calib-instructions">
-                            <span>P1 (Góra-Lewo: 0,0m) • P2 (Góra-Prawo: 105,0m) • P3 (Dół-Prawo: 105,68m) • P4 (Dół-Lewo: 0,68m)</span>
+                            <span id="calib-instructions-text">P1: Słupek Góra (0, 13.84m) • P2: Pole 16m Góra (16.5, 13.84m) • P3: Pole 16m Dół (16.5, 54.16m) • P4: Słupek Dół (0, 54.16m)</span>
                         </div>
                     </div>
 
@@ -221,7 +230,7 @@
                     <div class="canvas-panel">
                         <div class="canvas-panel-header">
                             <span style="font-weight: 700; font-size: 13px;">Radar Boiska 2D (105m × 68m FIFA Standard)</span>
-                            <span style="font-size: 11px; color: var(--cyan-home);">Błękit: Home • Koral: Away • Złoto: Piłka</span>
+                            <span id="radar-camera-frustum-badge" style="font-size: 11px; color: #38BDF8; font-family: var(--font-mono);">Kadr kamery: Aktywny</span>
                         </div>
                         <div class="canvas-wrap">
                             <canvas id="pitch-radar-canvas" width="640" height="414"></canvas>
@@ -345,17 +354,17 @@
             </div>
             <div style="font-size: 13px; line-height: 1.6; color: var(--text-secondary);">
                 <p style="margin-bottom: 12px;">
-                    Zgodnie z założeniami <strong>PitchLab</strong>, główny silnik analizy działa <strong>w 100% lokalnie i bezkosztowo</strong> w Twojej przeglądarce za pomocą Canvas Image Processing i homografii.
+                    <strong>Gemini Flash Assist</strong> to opcjonalna asysta wizyjna VLM przeznaczona do inspekcji trudnych klatek wideo, weryfikacji nietypowych sytuacji lub pomocy przy etykietowaniu danych.
                 </p>
                 <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px; font-family: var(--font-mono); font-size: 11px; color: var(--pitch-green);">
-                    Prompt Vision: "Analyze football pitch frame, return bounding boxes [ymin, xmin, ymax, xmax] of players, ball, and team classification in JSON."
+                    Status: Opcjonalna asysta VLM. Główna automatyczna kalibracja, detekcja i wieloobiektowy tracking są wykonywane przez dedykowany pipeline Computer Vision na backendzie Pythona.
                 </div>
                 <p style="margin-bottom: 16px;">
-                    Lokalny silnik PitchLab zwrócił precyzyjne współrzędne <strong>105m × 68m</strong> z zerowym kosztem API i zerowym opóźnieniem sieciowym!
+                    Współrzędne boiska i prędkości są obliczane z modelu geometrycznego boiska FIFA <strong>105m × 68m</strong>, a wartości o niskiej pewności są jawnie oznaczane jako niepewne.
                 </p>
                 <div style="text-align: right;">
                     <button class="btn btn-primary" onclick="document.getElementById('gemini-modal').classList.remove('active')">
-                        Rozumiem, kontynuuj z lokalnym silnikiem CV
+                        Zamknij podgląd
                     </button>
                 </div>
             </div>

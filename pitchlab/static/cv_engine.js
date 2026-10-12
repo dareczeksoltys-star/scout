@@ -10,6 +10,76 @@ window.PitchLabCV = (function() {
     // -------------------------------------------------------------
     const Homography = {
         /**
+         * FIFA standard zone presets for broadcast zooms and tactical views
+         */
+        zonePresets: {
+            left_penalty_area: {
+                name: 'Lewe Pole Karne (Zbliżenie FIFA)',
+                instructions: 'P1: Słupek/Linia Góra (0, 13.84m) • P2: 16m Góra (16.5, 13.84m) • P3: 16m Dół (16.5, 54.16m) • P4: Słupek/Linia Dół (0, 54.16m)',
+                pins: [
+                    { x: 75, y: 110, label: 'P1 (0, 13.8m)' },
+                    { x: 480, y: 95, label: 'P2 (16.5, 13.8m)' },
+                    { x: 550, y: 325, label: 'P3 (16.5, 54.2m)' },
+                    { x: 50, y: 335, label: 'P4 (0, 54.2m)' }
+                ],
+                dstPts: [
+                    { x: 0.0, y: 13.84 },
+                    { x: 16.5, y: 13.84 },
+                    { x: 16.5, y: 54.16 },
+                    { x: 0.0, y: 54.16 }
+                ]
+            },
+            full_pitch: {
+                name: 'Pełne Boisko (105m × 68m)',
+                instructions: 'P1: Róg Góra-Lewo (0, 0m) • P2: Róg Góra-Prawo (105, 0m) • P3: Róg Dół-Prawo (105, 68m) • P4: Róg Dół-Lewo (0, 68m)',
+                pins: [
+                    { x: 80, y: 60, label: 'P1 (0, 0)' },
+                    { x: 560, y: 60, label: 'P2 (105, 0)' },
+                    { x: 600, y: 320, label: 'P3 (105, 68)' },
+                    { x: 40, y: 320, label: 'P4 (0, 68)' }
+                ],
+                dstPts: [
+                    { x: 0.0, y: 0.0 },
+                    { x: 105.0, y: 0.0 },
+                    { x: 105.0, y: 68.0 },
+                    { x: 0.0, y: 68.0 }
+                ]
+            },
+            right_penalty_area: {
+                name: 'Prawe Pole Karne (Zbliżenie FIFA)',
+                instructions: 'P1: 16m Góra (88.5, 13.84m) • P2: Słupek Góra (105, 13.84m) • P3: Słupek Dół (105, 54.16m) • P4: 16m Dół (88.5, 54.16m)',
+                pins: [
+                    { x: 120, y: 95, label: 'P1 (88.5, 13.8m)' },
+                    { x: 565, y: 110, label: 'P2 (105, 13.8m)' },
+                    { x: 590, y: 335, label: 'P3 (105, 54.2m)' },
+                    { x: 80, y: 325, label: 'P4 (88.5, 54.2m)' }
+                ],
+                dstPts: [
+                    { x: 88.5, y: 13.84 },
+                    { x: 105.0, y: 13.84 },
+                    { x: 105.0, y: 54.16 },
+                    { x: 88.5, y: 54.16 }
+                ]
+            },
+            center_pitch: {
+                name: 'Środek Boiska (Koło środkowe)',
+                instructions: 'P1: Środek Góra-Lewo (35, 14m) • P2: Środek Góra-Prawo (70, 14m) • P3: Środek Dół-Prawo (70, 54m) • P4: Środek Dół-Lewo (35, 54m)',
+                pins: [
+                    { x: 100, y: 80, label: 'P1 (35, 14m)' },
+                    { x: 540, y: 80, label: 'P2 (70, 14m)' },
+                    { x: 580, y: 320, label: 'P3 (70, 54m)' },
+                    { x: 60, y: 320, label: 'P4 (35, 54m)' }
+                ],
+                dstPts: [
+                    { x: 35.0, y: 14.0 },
+                    { x: 70.0, y: 14.0 },
+                    { x: 70.0, y: 54.0 },
+                    { x: 35.0, y: 54.0 }
+                ]
+            }
+        },
+
+        /**
          * Solves 3x3 projective transformation matrix H from 4 source points to 4 destination points.
          * @param {Array<{x: number, y: number}>} srcPts - 4 pixel coordinates
          * @param {Array<{x: number, y: number}>} dstPts - 4 pitch meter coordinates
@@ -66,20 +136,27 @@ window.PitchLabCV = (function() {
         },
 
         /**
-         * Projects pixel coordinates (px, py) to standard pitch coordinates (0..105, 0..68)
+         * Projects pixel coordinates (px, py) to raw pitch coordinates in meters.
+         * Surowe wartości bez sztucznego obcinania - zwraca flagi inPitch i validProjection.
          */
         project: function(H, px, py) {
-            let denom = H[6] * px + H[7] * py + 1;
-            if (Math.abs(denom) < 1e-6) denom = 1e-6;
-            let pitchX = (H[0] * px + H[1] * py + H[2]) / denom;
-            let pitchY = (H[3] * px + H[4] * py + H[5]) / denom;
-
-            pitchX = Math.max(0, Math.min(105, pitchX));
-            pitchY = Math.max(0, Math.min(68, pitchY));
+            if (!H) {
+                return { pitchX: 0, pitchY: 0, rawX: 0, rawY: 0, inPitch: false, validProjection: false };
+            }
+            const denom = H[6] * px + H[7] * py + (H[8] !== undefined ? H[8] : 1);
+            const validProjection = denom > 1e-4; // Dodatni mianownik (punkt przed płaszczyzną kamery)
+            const safeDenom = Math.abs(denom) < 1e-6 ? 1e-6 : denom;
+            const rawX = (H[0] * px + H[1] * py + H[2]) / safeDenom;
+            const rawY = (H[3] * px + H[4] * py + H[5]) / safeDenom;
+            const inPitch = (rawX >= 0.0 && rawX <= 105.0 && rawY >= 0.0 && rawY <= 68.0);
 
             return {
-                pitchX: Math.round(pitchX * 100) / 100,
-                pitchY: Math.round(pitchY * 100) / 100
+                pitchX: Math.round(rawX * 100) / 100,
+                pitchY: Math.round(rawY * 100) / 100,
+                rawX: rawX,
+                rawY: rawY,
+                inPitch: inPitch,
+                validProjection: validProjection
             };
         },
 
@@ -210,7 +287,9 @@ window.PitchLabCV = (function() {
             const binWidth = 24;
             const numBins = Math.ceil(width / binWidth);
 
-            for (let y = 0; y < height; y += 4) {
+            // Skip top 18% of frame where stadium ads, banners and stands are situated
+            const pitchHorizonY = Math.floor(height * 0.18);
+            for (let y = pitchHorizonY; y < height; y += 4) {
                 for (let x = 0; x < width; x += 4) {
                     const idx = (y * width + x) * 4;
                     const r = data[idx];
@@ -238,6 +317,10 @@ window.PitchLabCV = (function() {
                         if (pts[i].y < minY) minY = pts[i].y;
                         if (pts[i].y > maxY) maxY = pts[i].y;
                     }
+
+                    // Reject boxes touching or close to top banner horizon
+                    if (minY <= pitchHorizonY + 4) continue;
+
                     const bw = maxX - minX + 8;
                     const bh = maxY - minY + 8;
                     if (bw >= 12 && bw <= 95 && bh >= 24 && bh <= 190) {
@@ -246,96 +329,72 @@ window.PitchLabCV = (function() {
                 }
             }
 
-            // Fallback generation if detection yields too few boxes (e.g. empty camera/canvas)
+            // Process genuine candidate boxes without artificial fallbacks
             const finalPlayers = [];
             let nextPlayerId = 1;
 
-            if (candidateBoxes.length >= 4) {
-                candidateBoxes.forEach(bbox => {
-                    const footX = bbox[0] + bbox[2] / 2;
-                    const footY = bbox[1] + bbox[3];
-                    const projected = Homography.project(H, footX, footY);
-                    const jerseyColor = this.sampleTorso(ctx, bbox);
-                    const team = this.classifyTeam(jerseyColor, projected.pitchX);
-                    const trackId = this.matchPreviousPlayers(projected, prevPlayers, nextPlayerId++);
+            candidateBoxes.forEach(bbox => {
+                const footX = bbox[0] + bbox[2] / 2;
+                const footY = bbox[1] + bbox[3];
+                const projected = Homography.project(H, footX, footY);
 
-                    finalPlayers.push({
-                        trackId,
-                        team,
-                        jerseyColorHex: jerseyColor,
-                        bbox: [Math.round(bbox[0]), Math.round(bbox[1]), Math.round(bbox[2]), Math.round(bbox[3])],
-                        pitchX: projected.pitchX,
-                        pitchY: projected.pitchY,
-                        velocityX: 0,
-                        velocityY: 0,
-                        speedKmh: 0
-                    });
+                // Reject projections that are invalid (behind camera) or outside 2m pitch margin
+                if (!projected.validProjection) return;
+                if (projected.pitchX < -2.0 || projected.pitchX > 107.0 ||
+                    projected.pitchY < -2.0 || projected.pitchY > 70.0) {
+                    return;
+                }
+
+                const jerseyColor = this.sampleTorso(ctx, bbox);
+                const team = this.classifyTeam(jerseyColor, projected.pitchX);
+                const trackId = this.matchPreviousPlayers(projected, prevPlayers, nextPlayerId++);
+
+                finalPlayers.push({
+                    trackId,
+                    team,
+                    jerseyColorHex: jerseyColor,
+                    bbox: [Math.round(bbox[0]), Math.round(bbox[1]), Math.round(bbox[2]), Math.round(bbox[3])],
+                    pitchX: projected.pitchX,
+                    pitchY: projected.pitchY,
+                    rawX: projected.rawX,
+                    rawY: projected.rawY,
+                    inPitch: projected.inPitch,
+                    velocityX: 0,
+                    velocityY: 0,
+                    speedKmh: 0
                 });
-            } else {
-                // Generate realistic tactical formations on the pitch for visual preview
-                const H_inv = Homography.invert(H);
-                const presets = [
-                    // Home players (Left 4-3-3)
-                    { px: 8.0, py: 34.0, team: 'home', color: '#06B6D4' },
-                    { px: 22.0, py: 14.0, team: 'home', color: '#06B6D4' },
-                    { px: 20.0, py: 26.0, team: 'home', color: '#06B6D4' },
-                    { px: 20.0, py: 42.0, team: 'home', color: '#06B6D4' },
-                    { px: 22.0, py: 54.0, team: 'home', color: '#06B6D4' },
-                    { px: 35.0, py: 20.0, team: 'home', color: '#06B6D4' },
-                    { px: 36.0, py: 34.0, team: 'home', color: '#06B6D4' },
-                    { px: 35.0, py: 48.0, team: 'home', color: '#06B6D4' },
-                    { px: 46.0, py: 18.0, team: 'home', color: '#06B6D4' },
-                    { px: 48.0, py: 34.0, team: 'home', color: '#06B6D4' },
-                    { px: 46.0, py: 50.0, team: 'home', color: '#06B6D4' },
-                    // Away players (Right 4-4-2)
-                    { px: 98.0, py: 34.0, team: 'away', color: '#F43F5E' },
-                    { px: 84.0, py: 16.0, team: 'away', color: '#F43F5E' },
-                    { px: 82.0, py: 28.0, team: 'away', color: '#F43F5E' },
-                    { px: 82.0, py: 40.0, team: 'away', color: '#F43F5E' },
-                    { px: 84.0, py: 52.0, team: 'away', color: '#F43F5E' },
-                    { px: 68.0, py: 18.0, team: 'away', color: '#F43F5E' },
-                    { px: 66.0, py: 30.0, team: 'away', color: '#F43F5E' },
-                    { px: 66.0, py: 38.0, team: 'away', color: '#F43F5E' },
-                    { px: 68.0, py: 50.0, team: 'away', color: '#F43F5E' },
-                    { px: 54.0, py: 28.0, team: 'away', color: '#F43F5E' },
-                    { px: 55.0, py: 40.0, team: 'away', color: '#F43F5E' },
-                    // Referee
-                    { px: 51.0, py: 35.0, team: 'referee', color: '#FACC15' }
-                ];
+            });
 
-                presets.forEach(p => {
-                    const screenPt = Homography.projectBack(H_inv, p.px, p.py);
-                    const bw = 24, bh = 54;
-                    const bx = Math.max(0, screenPt.px - bw / 2);
-                    const by = Math.max(0, screenPt.py - bh);
-                    const trackId = this.matchPreviousPlayers({ pitchX: p.px, pitchY: p.py }, prevPlayers, nextPlayerId++);
-
-                    finalPlayers.push({
-                        trackId,
-                        team: p.team,
-                        jerseyColorHex: p.color,
-                        bbox: [bx, by, bw, bh],
-                        pitchX: p.px,
-                        pitchY: p.py,
-                        velocityX: 0,
-                        velocityY: 0,
-                        speedKmh: 0
-                    });
-                });
-            }
-
-            // Ball detection
+            // Ball detection - honest evaluation, never fabricated
             const ballBright = this.findBrightestPoint(imageData, width, height);
-            const ballPitch = Homography.project(H, ballBright.x, ballBright.y);
-
-            const ballOutput = {
-                frameX: ballBright.x,
-                frameY: ballBright.y,
-                pitchX: ballPitch.pitchX,
-                pitchY: ballPitch.pitchY,
-                confidence: ballBright.confidence,
-                isDetected: ballBright.isDetected
+            let ballOutput = {
+                frameX: 0,
+                frameY: 0,
+                pitchX: 0,
+                pitchY: 0,
+                confidence: 0,
+                isDetected: false,
+                inPitch: false
             };
+
+            if (ballBright && ballBright.isDetected) {
+                const ballPitch = Homography.project(H, ballBright.x, ballBright.y);
+                const isBallValid = ballPitch.validProjection &&
+                    ballPitch.pitchX >= -2.0 && ballPitch.pitchX <= 107.0 &&
+                    ballPitch.pitchY >= -2.0 && ballPitch.pitchY <= 70.0;
+
+                if (isBallValid) {
+                    ballOutput = {
+                        frameX: ballBright.x,
+                        frameY: ballBright.y,
+                        pitchX: ballPitch.pitchX,
+                        pitchY: ballPitch.pitchY,
+                        confidence: ballBright.confidence,
+                        isDetected: true,
+                        inPitch: ballPitch.inPitch
+                    };
+                }
+            }
 
             const formatTime = (sec) => {
                 const m = Math.floor(sec / 60);

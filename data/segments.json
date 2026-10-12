@@ -90,6 +90,19 @@
       "label": "Akcja bramkowa / Gol",
       "notes": "",
       "created_at": "2026-10-12T09:41:48.966518"
+    },
+    {
+      "id": "seg_aa51b640",
+      "video_id": "videoplayback (1)",
+      "video_name": "videoplayback (1).mp4",
+      "start_time": 5.25,
+      "end_time": 7.43,
+      "start_formatted": "00:05.25",
+      "end_formatted": "00:07.43",
+      "duration": 2.18,
+      "label": "Analiza CV (YOLO)",
+      "notes": "",
+      "created_at": "2026-10-12T12:04:17.324373"
     }
   ]
 }

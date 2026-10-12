@@ -22,26 +22,33 @@
         m2Speed: 1.0,
         m2PlayIntervalId: null,
 
+        currentZonePreset: 'left_penalty_area',
         // Homography Calibration Quad (pixel coordinates on active frame)
-        // Default initialized relative to canvas size
+        // Default initialized to left penalty area FIFA standard coordinates
         homographyPins: [
-            { x: 80, y: 60, label: 'TL (0, 0)' },
-            { x: 560, y: 60, label: 'TR (105, 0)' },
-            { x: 600, y: 320, label: 'BR (105, 68)' },
-            { x: 40, y: 320, label: 'BL (0, 68)' }
+            { x: 75, y: 110, label: 'P1 (0, 13.8m)' },
+            { x: 480, y: 95, label: 'P2 (16.5, 13.8m)' },
+            { x: 550, y: 325, label: 'P3 (16.5, 54.2m)' },
+            { x: 50, y: 335, label: 'P4 (0, 54.2m)' }
         ],
         destinationPitchPts: [
-            { x: 0, y: 0 },
-            { x: 105, y: 0 },
-            { x: 105, y: 68 },
-            { x: 0, y: 68 }
+            { x: 0.0, y: 13.84 },
+            { x: 16.5, y: 13.84 },
+            { x: 16.5, y: 54.16 },
+            { x: 0.0, y: 54.16 }
         ],
         homographyMatrix: null,
         draggedPinIndex: null,
 
         voronoiEnabled: false,
         demoIntervalId: null,
-        isSyntheticDemo: false
+        isSyntheticDemo: false,
+
+        // Backend integration
+        videoFile: null,           // File object gdy user wybrał plik wideo
+        backendAvailable: false,   // true gdy /api/videos odpowiada
+        lastBackendVideoId: null,  // id z /api/upload (unikamy re-upload)
+        lastBackendVideoFile: null // referencja do poprzednio uploadowanego File
     };
 
     // DOM Elements
@@ -78,6 +85,9 @@
 
             activeFrameCanvas: document.getElementById('active-frame-canvas'),
             pitchRadarCanvas: document.getElementById('pitch-radar-canvas'),
+            zonePresetSelect: document.getElementById('zone-preset-select'),
+            calibInstructionsText: document.getElementById('calib-instructions-text'),
+            radarCameraFrustumBadge: document.getElementById('radar-camera-frustum-badge'),
             btnResetCalib: document.getElementById('btn-reset-calib'),
             btnProcessFrame: document.getElementById('btn-process-frame'),
             btnProcessAll: document.getElementById('btn-process-all'),
@@ -148,6 +158,10 @@
             if (!file) return;
             stopSyntheticDemo();
             state.isSyntheticDemo = false;
+            // Zapamiętaj plik do późniejszego uploadu do backendu
+            state.videoFile = file;
+            state.lastBackendVideoId = null;  // nowy plik = wymuś re-upload
+            state.lastBackendVideoFile = null;
             const url = URL.createObjectURL(file);
             els.video.src = url;
             els.video.load();
@@ -397,7 +411,203 @@
     }
 
     // -------------------------------------------------------------
-    // Frame Extractor (Canvas Frame Grabber)
+    // Backend API: Upload + Analyze przez YOLO/ByteTrack pipeline
+    // -------------------------------------------------------------
+
+    /**
+     * Uploaduje plik do backendu, tworzy segment i uruchamia analizę.
+     * @param {File} videoFile
+     * @param {number} startTime
+     * @param {number} endTime
+     * @returns {Promise<Object>} wynik analizy z backendu
+     */
+    async function analyzeSegmentViaBackend(videoFile, startTime, endTime) {
+        // 1. Upload (tylko jeśli nowy plik)
+        let videoId = state.lastBackendVideoId;
+        if (!videoId || state.lastBackendVideoFile !== videoFile) {
+            updateProgressLabel('Przesyłam wideo do backendu...');
+            const formData = new FormData();
+            formData.append('file', videoFile);
+            const uploadResp = await fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            });
+            if (!uploadResp.ok) {
+                const err = await uploadResp.text();
+                throw new Error(`Upload failed (${uploadResp.status}): ${err}`);
+            }
+            const videoInfo = await uploadResp.json();
+            videoId = videoInfo.id;
+            state.lastBackendVideoId = videoId;
+            state.lastBackendVideoFile = videoFile;
+        }
+
+        // 2. Utwórz segment
+        updateProgressLabel('Tworzę segment w bazie...');
+        const segResp = await fetch('/api/segments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                video_id: videoId,
+                start_time: startTime,
+                end_time: endTime,
+                label: 'Analiza CV (YOLO)'
+            })
+        });
+        if (!segResp.ok) {
+            const err = await segResp.text();
+            throw new Error(`Segment creation failed (${segResp.status}): ${err}`);
+        }
+        const segment = await segResp.json();
+
+        // 3. Uruchom analizę (długie - YOLO inference, timeout 180s)
+        updateProgressLabel('⚡ Analizuję YOLO/ByteTrack (może chwilę trwać)...');
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 180000);
+        try {
+            const analyzeResp = await fetch(`/api/segments/${segment.id}/analyze`, {
+                method: 'POST',
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            if (!analyzeResp.ok) {
+                const err = await analyzeResp.text();
+                throw new Error(`Analysis failed (${analyzeResp.status}): ${err}`);
+            }
+            return await analyzeResp.json();
+        } catch (e) {
+            clearTimeout(timeoutId);
+            throw e;
+        }
+    }
+
+    /**
+     * Konwertuje wynik backendu na frameRecord.detection w formacie frontendowym.
+     * @param {Object} apiResponse - wynik z /api/segments/{id}/analyze
+     * @param {string[]} frameDataUrls - tablica dataURL thumbnailów (indeks = pozycja w frames[])
+     * @returns {Object[]} tablica frameRecord
+     */
+    function backendFramesToDetections(apiResponse, frameDataUrls) {
+        const isSynthetic = apiResponse.synthetic === true;
+        const fps = apiResponse.fps || 25;
+        const frames = apiResponse.frames || [];
+
+        const results = [];
+        let prevPlayers = [];
+        let prevTimestamp = null;
+
+        frames.forEach((frame, idx) => {
+            const timestamp = frame.timestamp ?? (apiResponse.start_time + frame.frame_idx / fps);
+            const dtSec = (prevTimestamp !== null) ? Math.max(0.001, timestamp - prevTimestamp) : (1 / fps);
+
+            // Mapowanie playerów: filtruj niskie confidence, konwertuj pola
+            const players = (frame.players || []).filter(p => {
+                // Nie dodajemy zawodników o conf < 0.3 (chyba że syntetyk)
+                return isSynthetic || (p.conf >= 0.3);
+            }).map(p => {
+                const trackId = 'P' + p.track_id;
+                // Backend team: 'A'->home, 'B'->away, 'referee'->referee
+                const team = p.team === 'A' ? 'home' : (p.team === 'B' ? 'away' : 'referee');
+                // bbox backend: [x1,y1,x2,y2] -> frontend: [x1,y1,w,h]
+                const bbox = Array.isArray(p.bbox) && p.bbox.length === 4
+                    ? [p.bbox[0], p.bbox[1], p.bbox[2] - p.bbox[0], p.bbox[3] - p.bbox[1]]
+                    : [0, 0, 20, 40];
+
+                return {
+                    trackId,
+                    team,
+                    jerseyColorHex: team === 'home' ? '#06B6D4' : (team === 'referee' ? '#FACC15' : '#F43F5E'),
+                    bbox,
+                    pitchX: p.x,
+                    pitchY: p.y,
+                    rawX: p.x,
+                    rawY: p.y,
+                    inPitch: (p.x >= 0 && p.x <= 105 && p.y >= 0 && p.y <= 68),
+                    velocityX: 0,
+                    velocityY: 0,
+                    speedKmh: 0,
+                    conf: p.conf,
+                    _fromBackend: true,
+                    _synthetic: isSynthetic
+                };
+            });
+
+            // Przelicz prędkości między klatkami (tylko dla wiarygodnych detekcji)
+            players.forEach(curr => {
+                const prev = prevPlayers.find(p => p.trackId === curr.trackId);
+                if (prev && curr.conf >= 0.3 && prev.conf >= 0.3) {
+                    const vx = (curr.pitchX - prev.pitchX) / dtSec;
+                    const vy = (curr.pitchY - prev.pitchY) / dtSec;
+                    const speed = Math.hypot(vx, vy);
+                    // Limit fizyczny: zawodnik max ~43 km/h
+                    if (speed * 3.6 <= 45) {
+                        curr.velocityX = Math.round(vx * 100) / 100;
+                        curr.velocityY = Math.round(vy * 100) / 100;
+                        curr.speedKmh = Math.round(speed * 3.6 * 10) / 10;
+                    }
+                }
+            });
+
+            // Piłka
+            let ball = { frameX: 0, frameY: 0, pitchX: 0, pitchY: 0, confidence: 0, isDetected: false, inPitch: false };
+            if (frame.ball && frame.ball.conf >= 0.3) {
+                const b = frame.ball;
+                const bboxCenter = Array.isArray(b.bbox) && b.bbox.length === 4
+                    ? [(b.bbox[0] + b.bbox[2]) / 2, (b.bbox[1] + b.bbox[3]) / 2]
+                    : [0, 0];
+                ball = {
+                    frameX: bboxCenter[0],
+                    frameY: bboxCenter[1],
+                    pitchX: b.x,
+                    pitchY: b.y,
+                    confidence: b.conf,
+                    isDetected: true,
+                    inPitch: (b.x >= 0 && b.x <= 105 && b.y >= 0 && b.y <= 68),
+                    _fromBackend: true
+                };
+            }
+
+            const frameRecord = {
+                frameIndex: frame.frame_idx,
+                timestampSeconds: timestamp,
+                timecode: formatTime(timestamp),
+                dataUrl: frameDataUrls[idx] || '',
+                detection: {
+                    frameIndex: frame.frame_idx,
+                    timestampSeconds: timestamp,
+                    timecode: formatTime(timestamp),
+                    dimensions: { width: 640, height: 360 },
+                    pitchDimensions: { lengthMeters: 105, widthMeters: 68 },
+                    players,
+                    ball,
+                    _fromBackend: true,
+                    _synthetic: isSynthetic
+                },
+                _fromBackend: true,
+                _synthetic: isSynthetic
+            };
+
+            results.push(frameRecord);
+            prevPlayers = players;
+            prevTimestamp = timestamp;
+        });
+
+        return results;
+    }
+
+    function updateProgressLabel(text) {
+        if (els.extractionProgressBar) {
+            const label = els.extractionProgressBar.parentElement;
+            if (label) {
+                const span = label.querySelector('.progress-label');
+                if (span) span.textContent = text;
+            }
+        }
+        console.info('[PitchLab]', text);
+    }
+
+    // -------------------------------------------------------------
+    // Frame Extractor (Canvas Frame Grabber + Backend YOLO)
     // -------------------------------------------------------------
     async function extractFramesPipeline() {
         els.btnExtractFrames.disabled = true;
@@ -415,77 +625,141 @@
         }
         if (sampleTimes.length === 0) sampleTimes.push(startSec);
 
+        // --- Próba użycia backendu (YOLO) ---
+        const useBackend = state.backendAvailable && !state.isSyntheticDemo && state.videoFile;
+        let backendResult = null;
+
+        if (useBackend) {
+            try {
+                backendResult = await analyzeSegmentViaBackend(state.videoFile, startSec, endSec);
+            } catch (err) {
+                console.warn('[PitchLab] Backend YOLO niedostępny, przełączam na CV heurystyczny:', err.message);
+                backendResult = null;
+                // Pokaż ostrzeżenie w UI
+                updateProgressLabel('⚠️ Fallback: CV heurystyczny (YOLO niedostępny)');
+            }
+        }
+
+        // Zawsze robimy canvas capture dla thumbnailów
         const captureCanvas = document.createElement('canvas');
         captureCanvas.width = 640;
         captureCanvas.height = 360;
         const cctx = captureCanvas.getContext('2d');
 
         updateHomography();
-        let prevPlayers = [];
 
-        for (let i = 0; i < sampleTimes.length; i++) {
-            const timePoint = sampleTimes[i];
-            const frameIndex = Math.round(timePoint * state.fps);
+        if (backendResult && backendResult.frames && backendResult.frames.length > 0) {
+            // === TRYB BACKEND: Pobierz thumbnails i użyj danych z YOLO ===
+            updateProgressLabel('⚡ Pobieranie klatek wideo (thumbnails)...');
+            const dataUrls = [];
 
-            if (!state.isSyntheticDemo) {
-                els.video.currentTime = timePoint;
-                await new Promise(res => {
-                    const onSeeked = () => {
-                        els.video.removeEventListener('seeked', onSeeked);
-                        res();
-                    };
-                    els.video.addEventListener('seeked', onSeeked);
-                });
-            }
-
-            // Draw video to capture canvas
-            try {
-                cctx.drawImage(els.video, 0, 0, captureCanvas.width, captureCanvas.height);
-            } catch (err) {
-                // If CORS prevents drawing external video, fill with styled placeholder
-                cctx.fillStyle = '#1e3a1e';
-                cctx.fillRect(0, 0, captureCanvas.width, captureCanvas.height);
-            }
-
-            const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.85);
-
-            // Execute in-browser CV extraction
-            const detection = window.PitchLabCV.Detector.analyzeFrame(
-                cctx,
-                captureCanvas.width,
-                captureCanvas.height,
-                state.homographyMatrix,
-                prevPlayers,
-                frameIndex,
-                timePoint
+            // Budujemy mapę: timestamp -> dataUrl
+            const backendFrames = backendResult.frames;
+            const backendTimestamps = backendFrames.map(f =>
+                f.timestamp ?? (backendResult.start_time + f.frame_idx / (backendResult.fps || 25))
             );
 
-            // Compute velocities between frames
-            window.PitchLabCV.Tactics.calcVelocities(detection.players, prevPlayers, dtSec);
-            prevPlayers = detection.players;
+            for (let i = 0; i < backendFrames.length; i++) {
+                const timePoint = backendTimestamps[i];
 
-            const frameRecord = {
-                frameIndex,
-                timestampSeconds: timePoint,
-                timecode: formatTime(timePoint),
-                dataUrl,
-                detection
-            };
-            state.extractedFrames.push(frameRecord);
+                try {
+                    els.video.currentTime = timePoint;
+                    await new Promise(res => {
+                        const onSeeked = () => { els.video.removeEventListener('seeked', onSeeked); res(); };
+                        els.video.addEventListener('seeked', onSeeked);
+                        setTimeout(res, 500);  // timeout zabezpieczający
+                    });
+                    cctx.drawImage(els.video, 0, 0, 640, 360);
+                } catch (_) {
+                    cctx.fillStyle = '#1e3a1e';
+                    cctx.fillRect(0, 0, 640, 360);
+                }
 
-            // Append Thumbnail Card to Filmstrip
-            appendThumbnailCard(frameRecord, i);
+                dataUrls.push(captureCanvas.toDataURL('image/jpeg', 0.75));
 
-            // Progress bar update
-            const pct = Math.round(((i + 1) / sampleTimes.length) * 100);
-            els.extractionProgressBar.style.width = `${pct}%`;
+                const pct = Math.round(((i + 1) / backendFrames.length) * 50 + 50);
+                els.extractionProgressBar.style.width = `${pct}%`;
+            }
+
+            // Konwertuj wyniki backendu na format frontendowy
+            const frameRecords = backendFramesToDetections(backendResult, dataUrls);
+
+            frameRecords.forEach((frameRecord, i) => {
+                state.extractedFrames.push(frameRecord);
+                appendThumbnailCard(frameRecord, i);
+            });
+
+            const syntheticNote = backendResult.synthetic ? ' (dane SYNTETYCZNE - brak YOLO)' : '';
+            console.info(`[PitchLab] Backend analiza OK: ${frameRecords.length} klatek${syntheticNote}`);
+            if (backendResult.synthetic) {
+                updateProgressLabel('⚠️ Dane syntetyczne (backend nie mógł uruchomić YOLO)');
+            } else {
+                updateProgressLabel(`✅ YOLO: ${frameRecords.length} klatek, średnio ${backendResult.stats?.tracked_players_count || '?'} zawodników`);
+            }
+
+        } else {
+            // === TRYB FALLBACK: Stary heurystyczny CV (analyzeFrame) ===
+            if (!state.isSyntheticDemo && state.videoFile) {
+                updateProgressLabel('🔵 Tryb offline: CV heurystyczny (bez YOLO)');
+            }
+            let prevPlayers = [];
+
+            for (let i = 0; i < sampleTimes.length; i++) {
+                const timePoint = sampleTimes[i];
+                const frameIndex = Math.round(timePoint * state.fps);
+
+                if (!state.isSyntheticDemo) {
+                    els.video.currentTime = timePoint;
+                    await new Promise(res => {
+                        const onSeeked = () => {
+                            els.video.removeEventListener('seeked', onSeeked);
+                            res();
+                        };
+                        els.video.addEventListener('seeked', onSeeked);
+                    });
+                }
+
+                try {
+                    cctx.drawImage(els.video, 0, 0, captureCanvas.width, captureCanvas.height);
+                } catch (err) {
+                    cctx.fillStyle = '#1e3a1e';
+                    cctx.fillRect(0, 0, captureCanvas.width, captureCanvas.height);
+                }
+
+                const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.85);
+
+                const detection = window.PitchLabCV.Detector.analyzeFrame(
+                    cctx,
+                    captureCanvas.width,
+                    captureCanvas.height,
+                    state.homographyMatrix,
+                    prevPlayers,
+                    frameIndex,
+                    timePoint
+                );
+
+                window.PitchLabCV.Tactics.calcVelocities(detection.players, prevPlayers, dtSec);
+                prevPlayers = detection.players;
+
+                const frameRecord = {
+                    frameIndex,
+                    timestampSeconds: timePoint,
+                    timecode: formatTime(timePoint),
+                    dataUrl,
+                    detection
+                };
+                state.extractedFrames.push(frameRecord);
+                appendThumbnailCard(frameRecord, i);
+
+                const pct = Math.round(((i + 1) / sampleTimes.length) * 100);
+                els.extractionProgressBar.style.width = `${pct}%`;
+            }
         }
 
         els.btnExtractFrames.disabled = false;
         els.btnDownloadZip.disabled = false;
         els.btnGoModule2.disabled = false;
 
-        // Select first frame by default
         if (state.extractedFrames.length > 0) {
             selectFrame(0);
         }
@@ -678,18 +952,37 @@
             state.draggedPinIndex = null;
         });
 
-        els.btnResetCalib.addEventListener('click', () => {
-            state.homographyPins = [
-                { x: 80, y: 60, label: 'TL (0, 0)' },
-                { x: 560, y: 60, label: 'TR (105, 0)' },
-                { x: 600, y: 320, label: 'BR (105, 68)' },
-                { x: 40, y: 320, label: 'BL (0, 68)' }
-            ];
+        function applyZonePreset(zoneKey) {
+            state.currentZonePreset = zoneKey;
+            const presets = window.PitchLabCV.Homography.zonePresets;
+            const preset = presets ? presets[zoneKey] : null;
+            if (!preset) return;
+
+            state.homographyPins = JSON.parse(JSON.stringify(preset.pins));
+            state.destinationPitchPts = JSON.parse(JSON.stringify(preset.dstPts));
+
+            if (els.calibInstructionsText) {
+                els.calibInstructionsText.textContent = preset.instructions;
+            }
+            if (els.zonePresetSelect && els.zonePresetSelect.value !== zoneKey) {
+                els.zonePresetSelect.value = zoneKey;
+            }
+
             updateHomography();
             renderActiveFrame();
             reprojectCurrentFrame();
             renderPitchRadar();
             updateTacticalMetrics();
+        }
+
+        if (els.zonePresetSelect) {
+            els.zonePresetSelect.addEventListener('change', (e) => {
+                applyZonePreset(e.target.value);
+            });
+        }
+
+        els.btnResetCalib.addEventListener('click', () => {
+            applyZonePreset(state.currentZonePreset || 'left_penalty_area');
         });
 
         els.btnProcessFrame.addEventListener('click', () => {
@@ -735,15 +1028,21 @@
             const proj = window.PitchLabCV.Homography.project(state.homographyMatrix, footX, footY);
             p.pitchX = proj.pitchX;
             p.pitchY = proj.pitchY;
+            p.rawX = proj.rawX;
+            p.rawY = proj.rawY;
+            p.inPitch = proj.inPitch;
         });
 
-        const ballProj = window.PitchLabCV.Homography.project(
-            state.homographyMatrix,
-            cur.detection.ball.frameX,
-            cur.detection.ball.frameY
-        );
-        cur.detection.ball.pitchX = ballProj.pitchX;
-        cur.detection.ball.pitchY = ballProj.pitchY;
+        if (cur.detection.ball && cur.detection.ball.isDetected) {
+            const ballProj = window.PitchLabCV.Homography.project(
+                state.homographyMatrix,
+                cur.detection.ball.frameX,
+                cur.detection.ball.frameY
+            );
+            cur.detection.ball.pitchX = ballProj.pitchX;
+            cur.detection.ball.pitchY = ballProj.pitchY;
+            cur.detection.ball.inPitch = ballProj.inPitch;
+        }
     }
 
     function renderActiveFrame() {
@@ -913,16 +1212,72 @@
         ctx.strokeRect(-4, goalMouthY, 4, goalMouthH);
         ctx.strokeRect(W, goalMouthY, 4, goalMouthH);
 
+        // Draw Camera Field of View (FOV Frustum) on 2D Pitch Radar
+        if (state.homographyMatrix) {
+            // Test ground-plane corners below frame horizon
+            const testCorners = [
+                { x: 0, y: 70 },
+                { x: 640, y: 70 },
+                { x: 640, y: 360 },
+                { x: 0, y: 360 }
+            ];
+
+            const fov = testCorners.map(pt => window.PitchLabCV.Homography.project(state.homographyMatrix, pt.x, pt.y));
+            const allValid = fov.every(pt => pt.validProjection);
+
+            if (allValid) {
+                ctx.save();
+                ctx.fillStyle = 'rgba(56, 189, 248, 0.14)';
+                ctx.strokeStyle = '#38BDF8';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([5, 4]);
+
+                ctx.beginPath();
+                const startX = Math.max(0, Math.min(105, fov[0].pitchX)) * scaleX;
+                const startY = Math.max(0, Math.min(68, fov[0].pitchY)) * scaleY;
+                ctx.moveTo(startX, startY);
+                for (let i = 1; i < fov.length; i++) {
+                    const cx = Math.max(0, Math.min(105, fov[i].pitchX)) * scaleX;
+                    const cy = Math.max(0, Math.min(68, fov[i].pitchY)) * scaleY;
+                    ctx.lineTo(cx, cy);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+
+                // Calculate visible field span & action sector
+                const validPoints = fov.filter(pt => pt.inPitch);
+                if (validPoints.length > 0) {
+                    const minX = Math.min(...validPoints.map(pt => pt.pitchX));
+                    const maxX = Math.max(...validPoints.map(pt => pt.pitchX));
+                    const spanX = Math.max(1, Math.round((maxX - minX) * 10) / 10);
+                    const midX = (minX + maxX) / 2;
+
+                    let sectorName = 'Środek Boiska';
+                    if (midX < 35) sectorName = 'Lewe Pole Karne (Bramka L)';
+                    else if (midX > 70) sectorName = 'Prawe Pole Karne (Bramka P)';
+
+                    if (els.radarCameraFrustumBadge) {
+                        els.radarCameraFrustumBadge.textContent = `📹 Kadr: ${sectorName} (~${spanX}m pola)`;
+                    }
+                }
+            } else if (els.radarCameraFrustumBadge) {
+                els.radarCameraFrustumBadge.textContent = `📹 Kadr: Zbliżenie (Horyzont kamery poza boiskiem)`;
+            }
+        }
+
         // Draw Players on 2D Radar
         if (cur && cur.detection) {
             cur.detection.players.forEach(p => {
-                const px = p.pitchX * scaleX;
-                const py = p.pitchY * scaleY;
+                // Clamp coordinates ONLY for radar display drawing
+                const drawX = Math.max(0, Math.min(105, p.pitchX)) * scaleX;
+                const drawY = Math.max(0, Math.min(68, p.pitchY)) * scaleY;
 
                 // Player dot
                 ctx.fillStyle = p.team === 'home' ? '#06B6D4' : p.team === 'away' ? '#F43F5E' : '#FACC15';
                 ctx.beginPath();
-                ctx.arc(px, py, 6, 0, Math.PI * 2);
+                ctx.arc(drawX, drawY, 6, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.strokeStyle = '#FFFFFF';
                 ctx.lineWidth = 1.5;
@@ -931,26 +1286,34 @@
                 // Track ID
                 ctx.fillStyle = '#FFFFFF';
                 ctx.font = '9px JetBrains Mono, monospace';
-                ctx.fillText(p.trackId, px + 8, py + 3);
+                ctx.fillText(p.trackId, drawX + 8, drawY + 3);
 
-                // Velocity Arrow
-                if (p.velocityX || p.velocityY) {
+                // Physical Velocity Arrow: 1 second vector in meters, capped at 12 m/s (~43 km/h)
+                const speed = Math.hypot(p.velocityX || 0, p.velocityY || 0);
+                if (speed > 0.1 && speed <= 12.0) {
+                    const dispLengthMeters = Math.min(speed, 6.0);
+                    const normVx = (p.velocityX || 0) / speed;
+                    const normVy = (p.velocityY || 0) / speed;
+                    const arrowEndX = drawX + (normVx * dispLengthMeters) * scaleX;
+                    const arrowEndY = drawY + (normVy * dispLengthMeters) * scaleY;
+
                     ctx.strokeStyle = ctx.fillStyle;
+                    ctx.lineWidth = 1.5;
                     ctx.beginPath();
-                    ctx.moveTo(px, py);
-                    ctx.lineTo(px + p.velocityX * 3, py + p.velocityY * 3);
+                    ctx.moveTo(drawX, drawY);
+                    ctx.lineTo(arrowEndX, arrowEndY);
                     ctx.stroke();
                 }
             });
 
-            // Ball on Radar
-            if (cur.detection.ball) {
-                const bx = cur.detection.ball.pitchX * scaleX;
-                const by = cur.detection.ball.pitchY * scaleY;
+            // Ball on Radar - strictly only when honestly detected
+            if (cur.detection.ball && cur.detection.ball.isDetected) {
+                const drawBx = Math.max(0, Math.min(105, cur.detection.ball.pitchX)) * scaleX;
+                const drawBy = Math.max(0, Math.min(68, cur.detection.ball.pitchY)) * scaleY;
 
                 ctx.fillStyle = '#F59E0B';
                 ctx.beginPath();
-                ctx.arc(bx, by, 5, 0, Math.PI * 2);
+                ctx.arc(drawBx, drawBy, 5, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.strokeStyle = '#FFFFFF';
                 ctx.lineWidth = 1.5;
@@ -1091,6 +1454,33 @@
     }
 
     // -------------------------------------------------------------
+    // Backend Health Check
+    // -------------------------------------------------------------
+    async function checkBackendStatus() {
+        const badge = document.getElementById('backend-status-badge');
+        try {
+            const resp = await fetch('/api/videos', { signal: AbortSignal.timeout(3000) });
+            if (resp.ok) {
+                state.backendAvailable = true;
+                if (badge) {
+                    badge.textContent = '🟢 Backend aktywny (YOLO)';
+                    badge.className = 'backend-badge backend-online';
+                }
+                console.info('[PitchLab] Backend dostępny – tryb YOLO aktywny');
+            } else {
+                throw new Error('Backend HTTP ' + resp.status);
+            }
+        } catch (_) {
+            state.backendAvailable = false;
+            if (badge) {
+                badge.textContent = '🔴 Tryb offline (CV heurystyczny)';
+                badge.className = 'backend-badge backend-offline';
+            }
+            console.warn('[PitchLab] Backend niedostępny – fallback do CV heurystycznego');
+        }
+    }
+
+    // -------------------------------------------------------------
     // Initialization
     // -------------------------------------------------------------
     function init() {
@@ -1108,6 +1498,9 @@
         setupVideoModule();
         setupCalibratorEvents();
         setupModule3Events();
+
+        // Sprawdź status backendu asynchronicznie (nie blokuje UI)
+        checkBackendStatus();
 
         // Initial empty canvas renders
         renderActiveFrame();
