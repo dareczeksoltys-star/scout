@@ -14,10 +14,13 @@
 
         markerIn: 0,
         markerOut: 10,
-        samplingInterval: 60, // frames
+        samplingInterval: 15, // frames
 
         extractedFrames: [],
         currentFrameIndex: 0,
+        m2Playing: false,
+        m2Speed: 1.0,
+        m2PlayIntervalId: null,
 
         // Homography Calibration Quad (pixel coordinates on active frame)
         // Default initialized relative to canvas size
@@ -82,6 +85,22 @@
             btnExportJson: document.getElementById('btn-export-json'),
             btnExportCsv: document.getElementById('btn-export-csv'),
             tableBody: document.querySelector('#coordinates-table tbody'),
+
+            // Module 1 presets
+            btnFps1: document.getElementById('btn-fps-1'),
+            btnFps5: document.getElementById('btn-fps-5'),
+            btnFps15: document.getElementById('btn-fps-15'),
+            btnFps30: document.getElementById('btn-fps-30'),
+
+            // Module 2 playback
+            m2BtnFirst: document.getElementById('m2-btn-first'),
+            m2BtnPrev: document.getElementById('m2-btn-prev'),
+            m2BtnPlay: document.getElementById('m2-btn-play'),
+            m2BtnNext: document.getElementById('m2-btn-next'),
+            m2BtnLast: document.getElementById('m2-btn-last'),
+            m2FrameSlider: document.getElementById('m2-frame-slider'),
+            m2FrameInfo: document.getElementById('m2-frame-info'),
+            m2SpeedSelector: document.getElementById('m2-speed-selector'),
 
             // Module 3
             homeCentroidVal: document.getElementById('metric-home-centroid'),
@@ -201,9 +220,43 @@
 
         els.intervalSlider.addEventListener('input', (e) => {
             state.samplingInterval = parseInt(e.target.value);
-            els.intervalValue.textContent = `${state.samplingInterval} klatek (~${(state.samplingInterval / state.fps).toFixed(1)}s)`;
+            els.intervalValue.textContent = `${state.samplingInterval} klatek (~${(state.samplingInterval / state.fps).toFixed(2)}s)`;
             updateEstimateCount();
         });
+
+        const setSampling = (interval) => {
+            state.samplingInterval = interval;
+            els.intervalSlider.value = interval;
+            els.intervalValue.textContent = `${interval} klatek (~${(interval / state.fps).toFixed(2)}s)`;
+            updateEstimateCount();
+        };
+
+        if (els.btnFps1) els.btnFps1.addEventListener('click', () => setSampling(1));
+        if (els.btnFps5) els.btnFps5.addEventListener('click', () => setSampling(5));
+        if (els.btnFps15) els.btnFps15.addEventListener('click', () => setSampling(15));
+        if (els.btnFps30) els.btnFps30.addEventListener('click', () => setSampling(30));
+
+        // Module 2 Clip Playback Controller
+        if (els.m2BtnPlay) els.m2BtnPlay.addEventListener('click', togglePlayModule2Clip);
+        if (els.m2BtnFirst) els.m2BtnFirst.addEventListener('click', () => selectFrame(0));
+        if (els.m2BtnPrev) els.m2BtnPrev.addEventListener('click', () => selectFrame(state.currentFrameIndex - 1));
+        if (els.m2BtnNext) els.m2BtnNext.addEventListener('click', () => selectFrame(state.currentFrameIndex + 1));
+        if (els.m2BtnLast) els.m2BtnLast.addEventListener('click', () => selectFrame(state.extractedFrames.length - 1));
+
+        if (els.m2FrameSlider) {
+            els.m2FrameSlider.addEventListener('input', (e) => {
+                selectFrame(parseInt(e.target.value) || 0);
+            });
+        }
+
+        if (els.m2SpeedSelector) {
+            els.m2SpeedSelector.addEventListener('change', (e) => {
+                state.m2Speed = parseFloat(e.target.value) || 1.0;
+                if (state.m2Playing) {
+                    playModule2Clip();
+                }
+            });
+        }
 
         els.btnExtractFrames.addEventListener('click', extractFramesPipeline);
         els.btnDownloadZip.addEventListener('click', downloadFramesZip);
@@ -459,13 +512,67 @@
     }
 
     function selectFrame(idx) {
+        if (!state.extractedFrames || state.extractedFrames.length === 0) return;
+        idx = Math.max(0, Math.min(idx, state.extractedFrames.length - 1));
         state.currentFrameIndex = idx;
         document.querySelectorAll('.frame-thumb-card').forEach((c, i) => {
             c.classList.toggle('active', i === idx);
         });
+        updateModule2PlayerUI();
         renderActiveFrame();
         renderPitchRadar();
         updateTacticalMetrics();
+    }
+
+    function updateModule2PlayerUI() {
+        const total = state.extractedFrames.length;
+        if (!els.m2FrameSlider) return;
+        els.m2FrameSlider.max = Math.max(0, total - 1);
+        els.m2FrameSlider.value = state.currentFrameIndex;
+        if (total === 0) {
+            if (els.m2FrameInfo) els.m2FrameInfo.textContent = 'Klatka: 0 / 0 (00:00.000)';
+        } else {
+            const cur = state.extractedFrames[state.currentFrameIndex];
+            if (els.m2FrameInfo && cur) {
+                els.m2FrameInfo.textContent = `Klatka: ${state.currentFrameIndex + 1} / ${total} (${cur.timecode})`;
+            }
+        }
+        if (els.m2BtnPlay) {
+            els.m2BtnPlay.textContent = state.m2Playing ? '⏸ Pauza (2D)' : '▶ Odtwarzaj wideo/radar 2D';
+        }
+    }
+
+    function playModule2Clip() {
+        if (!state.extractedFrames || state.extractedFrames.length <= 1) return;
+        state.m2Playing = true;
+        updateModule2PlayerUI();
+        if (state.m2PlayIntervalId) clearInterval(state.m2PlayIntervalId);
+        const dtPerFrame = (state.samplingInterval / state.fps) * 1000;
+        const intervalMs = Math.max(25, (dtPerFrame || 100) / state.m2Speed);
+        state.m2PlayIntervalId = setInterval(() => {
+            let next = state.currentFrameIndex + 1;
+            if (next >= state.extractedFrames.length) {
+                next = 0; // loop playback
+            }
+            selectFrame(next);
+        }, intervalMs);
+    }
+
+    function pauseModule2Clip() {
+        state.m2Playing = false;
+        if (state.m2PlayIntervalId) {
+            clearInterval(state.m2PlayIntervalId);
+            state.m2PlayIntervalId = null;
+        }
+        updateModule2PlayerUI();
+    }
+
+    function togglePlayModule2Clip() {
+        if (state.m2Playing) {
+            pauseModule2Clip();
+        } else {
+            playModule2Clip();
+        }
     }
 
     // -------------------------------------------------------------
@@ -989,6 +1096,7 @@
     function init() {
         initElements();
         updateHomography();
+        updateModule2PlayerUI();
 
         // Nav click events
         els.stepButtons.forEach(btn => {

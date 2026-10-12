@@ -1,987 +1,369 @@
 <!DOCTYPE html>
 <html lang="pl">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PitchLab Studio | Football Video Annotation MVP</title>
+    <title>PitchLab - Soccer Video Spatial Analytics | System Matematycznej i Przestrzennej Analizy Wideo Piłki Nożnej</title>
+    
+    <!-- Modern Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
-        rel="stylesheet">
-    <style>
-        :root {
-            --bg-base: #070a13;
-            --bg-card: #101728 --bg-card-hover: #162038;
-            --border-color: #1f293d;
-            --border-focus: #10b981;
-            --pitch-green: #10b981;
-            --pitch-green-glow: rgba(16, 185, 129, 0.25);
-            --pitch-green-dark: #059669;
-            --sky-blue: #38bdf8;
-            --amber-warn: #f59e0b;
-            --red-danger: #ef4444;
-            --text-primary: #f8fafc;
-            --text-secondary: #94a3b8;
-            --text-muted: #64748b;
-        }
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- JSZip for in-browser client-side ZIP packaging of extracted frames -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
-        body {
-            background-color: var(--bg-base);
-            color: var(--text-primary);
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            min-height: 100vh;
-            padding: 24px;
-        }
-
-        .container {
-            max-width: 1280px;
-            margin: 0 auto;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        /* Header */
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 16px 24px;
-            background: linear-gradient(135deg, rgba(16, 23, 40, 0.95), rgba(15, 23, 42, 0.85));
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            backdrop-filter: blur(8px);
-        }
-
-        .brand {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .brand-icon {
-            font-size: 28px;
-            filter: drop-shadow(0 0 8px var(--pitch-green-glow));
-        }
-
-        .brand-title {
-            font-size: 20px;
-            font-weight: 800;
-            letter-spacing: -0.5px;
-            color: #fff;
-        }
-
-        .brand-tag {
-            background: rgba(16, 185, 129, 0.15);
-            color: var(--pitch-green);
-            padding: 2px 8px;
-            font-size: 11px;
-            font-weight: 700;
-            border-radius: 999px;
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            text-transform: uppercase;
-        }
-
-        /* Video selection bar */
-        .source-bar {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            align-items: center;
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 14px 20px;
-        }
-
-        .source-bar label {
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--text-secondary);
-        }
-
-        .select-input {
-            background-color: #0b1120;
-            border: 1px solid var(--border-color);
-            color: #fff;
-            padding: 8px 14px;
-            border-radius: 8px;
-            font-size: 13px;
-            outline: none;
-            cursor: pointer;
-            min-width: 260px;
-            transition: border-color 0.2s;
-        }
-
-        .select-input:focus {
-            border-color: var(--pitch-green);
-        }
-
-        /* Buttons */
-        .btn {
-            background-color: #1e293b;
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
-            padding: 8px 16px;
-            border-radius: 8px;
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            transition: all 0.2s ease;
-            user-select: none;
-        }
-
-        .btn:hover {
-            background-color: #27354f;
-            border-color: #3b4d75;
-        }
-
-        .btn-primary {
-            background-color: var(--pitch-green);
-            color: #032015;
-            border-color: var(--pitch-green);
-        }
-
-        .btn-primary:hover {
-            background-color: #059669;
-            color: #fff;
-            box-shadow: 0 0 16px var(--pitch-green-glow);
-        }
-
-        .btn-danger {
-            background-color: rgba(239, 68, 68, 0.15);
-            color: var(--red-danger);
-            border-color: rgba(239, 68, 68, 0.3);
-        }
-
-        .btn-danger:hover {
-            background-color: var(--red-danger);
-            color: #fff;
-        }
-
-        .btn-sm {
-            padding: 4px 10px;
-            font-size: 12px;
-        }
-
-        /* Main Workspace Grid */
-        .workspace {
-            display: grid;
-            grid-template-columns: 1fr 400px;
-            gap: 20px;
-        }
-
-        @media (max-width: 1024px) {
-            .workspace {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        /* Video Player Box */
-        .video-box {
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 16px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .video-frame {
-            position: relative;
-            width: 100%;
-            background: #000;
-            border-radius: 8px;
-            overflow: hidden;
-            aspect-ratio: 16 / 9;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-        }
-
-        video {
-            width: 100%;
-            height: 100%;
-            display: block;
-            object-fit: contain;
-        }
-
-        /* Time & Stepper Bar */
-        .player-controls {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            padding: 10px 14px;
-            background: #0b1120;
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-        }
-
-        .time-counter {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 15px;
-            font-weight: 700;
-            color: var(--pitch-green);
-        }
-
-        .time-counter .duration-val {
-            color: var(--text-muted);
-            font-size: 13px;
-        }
-
-        .steppers {
-            display: flex;
-            gap: 6px;
-            align-items: center;
-        }
-
-        /* Annotation Box */
-        .annotation-box {
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        .box-title {
-            font-size: 16px;
-            font-weight: 700;
-            color: #fff;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .marker-buttons {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-
-        /* Summary Banner */
-        .summary-card {
-            background: #0b1120;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 14px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            transition: all 0.2s ease;
-        }
-
-        .summary-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .summary-label {
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: var(--text-secondary);
-        }
-
-        .summary-times {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 16px;
-            font-weight: 700;
-            color: #fff;
-        }
-
-        .summary-duration {
-            font-size: 13px;
-            color: var(--sky-blue);
-            font-weight: 600;
-        }
-
-        .badge {
-            display: inline-block;
-            font-size: 11px;
-            font-weight: 700;
-            padding: 3px 8px;
-            border-radius: 6px;
-            text-transform: uppercase;
-        }
-
-        .badge-ready {
-            background: rgba(16, 185, 129, 0.15);
-            color: var(--pitch-green);
-            border: 1px solid rgba(16, 185, 129, 0.3);
-        }
-
-        .badge-waiting {
-            background: rgba(245, 158, 11, 0.15);
-            color: var(--amber-warn);
-            border: 1px solid rgba(245, 158, 11, 0.3);
-        }
-
-        .badge-error {
-            background: rgba(239, 68, 68, 0.15);
-            color: var(--red-danger);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-        }
-
-        /* Form elements */
-        .form-group {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .form-group label {
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-secondary);
-        }
-
-        .form-control {
-            background-color: #0b1120;
-            border: 1px solid var(--border-color);
-            color: #fff;
-            padding: 10px 14px;
-            border-radius: 8px;
-            font-size: 13px;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-
-        .form-control:focus {
-            border-color: var(--pitch-green);
-        }
-
-        /* Shortcuts guide */
-        .shortcut-hint {
-            font-size: 11px;
-            color: var(--text-muted);
-            line-height: 1.5;
-            background: #090e1a;
-            padding: 10px;
-            border-radius: 6px;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        .kbd {
-            background: #1e293b;
-            color: #e2e8f0;
-            padding: 1px 5px;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 11px;
-            border: 1px solid #334155;
-        }
-
-        /* Table Card */
-        .table-card {
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        .table-header-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .table-responsive {
-            overflow-x: auto;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }
-
-        th {
-            text-align: left;
-            padding: 12px 14px;
-            background: #0b1120;
-            color: var(--text-secondary);
-            font-weight: 600;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        td {
-            padding: 12px 14px;
-            border-bottom: 1px solid var(--border-color);
-            vertical-align: middle;
-        }
-
-        tr:hover td {
-            background-color: var(--bg-card-hover);
-        }
-
-        .tag-pill {
-            display: inline-block;
-            background: rgba(56, 189, 248, 0.15);
-            color: var(--sky-blue);
-            border: 1px solid rgba(56, 189, 248, 0.3);
-            border-radius: 999px;
-            padding: 2px 10px;
-            font-size: 11px;
-            font-weight: 600;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 40px;
-            color: var(--text-muted);
-            font-size: 14px;
-        }
-    </style>
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="/static/styles.css">
 </head>
-
 <body>
-    <div class="container">
-        <!-- Header -->
-        <header>
-            <div class="brand">
-                <span class="brand-icon">⚽</span>
-                <div>
-                    <span class="brand-title">PitchLab Studio</span>
-                    <span class="brand-tag">MVP v0.1</span>
-                </div>
+
+    <!-- Header Navigation & Stepper -->
+    <header>
+        <div class="brand">
+            <div class="brand-icon">⚽</div>
+            <div class="brand-text">
+                <h1>PitchLab Studio</h1>
+                <p>System Matematycznej i Przestrzennej Analizy Wideo Piłki Nożnej</p>
             </div>
-            <div>
-                <button class="btn btn-sm" id="exportJsonButton">📥 Eksportuj JSON</button>
-            </div>
-        </header>
-
-        <!-- Video Source & Upload Bar -->
-        <div class="source-bar">
-            <label for="videoSelect">Aktywne nagranie meczu:</label>
-            <select id="videoSelect" class="select-input">
-                <option value="">Wczytywanie listy wideo...</option>
-            </select>
-            <button class="btn" id="loadVideoButton">Załaduj</button>
-
-            <span style="color: var(--border-color); margin: 0 4px;">|</span>
-
-            <input type="file" id="fileInput" accept=".mp4,.mkv,.avi,.mov,.webm" style="display: none;">
-            <button class="btn btn-primary" id="selectFileBtn">📁 Wgraj nowe wideo z dysku</button>
-            <span id="uploadStatusText" style="font-size: 12px; color: var(--text-secondary);"></span>
         </div>
 
-        <!-- Main Workspace -->
-        <div class="workspace">
-            <!-- Video Player Column -->
-            <div class="video-box">
-                <div class="video-frame">
-                    <video id="videoPlayer" controls preload="metadata">
-                        Twoja przeglądarka nie wspiera odtwarzacza wideo HTML5.
-                    </video>
+        <nav class="stepper-nav">
+            <button class="step-btn active" data-step="1">
+                <span class="step-num">1</span> Moduł 1: Wideo & Klatki
+            </button>
+            <button class="step-btn" data-step="2">
+                <span class="step-num">2</span> Moduł 2: Ekstrakcja CV
+            </button>
+            <button class="step-btn" data-step="3">
+                <span class="step-num">3</span> Moduł 3: Kontrakt & Metryki
+            </button>
+        </nav>
+    </header>
+
+    <!-- Main Content Area -->
+    <main>
+
+        <!-- =========================================================================
+             MODUŁ 1: VIDEO INGEST & FRAME SLICER
+             ========================================================================= -->
+        <section class="module-section active" data-step="1">
+            <div class="card-panel">
+                <div class="panel-header">
+                    <h2>🎬 Moduł 1: Wideo & Krojenie Klatek (Video Ingest & Slicer)</h2>
+                    <span class="panel-badge">Krok Ingestu</span>
                 </div>
 
-                <!-- Custom Stepper Controls & Time -->
-                <div class="player-controls">
-                    <div class="time-counter">
-                        <span id="currentTimer">00:00.00</span>
-                        <span class="duration-val">/ <span id="totalDuration">00:00.00</span></span>
+                <div class="source-controls">
+                    <label class="btn btn-secondary">
+                        📁 Wgraj plik wideo (MP4/WebM)
+                        <input type="file" id="video-file-input" accept="video/mp4,video/webm,video/mkv,video/avi" style="display: none;">
+                    </label>
+                    <button class="btn btn-cyan" id="btn-load-demo">
+                        ⚡ Załaduj wideo demonstracyjne
+                    </button>
+                </div>
+
+                <!-- Video Stage -->
+                <div class="video-stage-container">
+                    <video id="video-player" playsinline></video>
+                </div>
+
+                <!-- Player Controls & Timeline -->
+                <div class="video-player-bar">
+                    <input type="range" class="timeline-scrubber" id="timeline-scrubber" min="0" max="10" step="0.01" value="0">
+                    
+                    <div class="timeline-row">
+                        <div class="controls-group">
+                            <button class="btn btn-secondary" id="btn-play-pause">▶ Odtwórz</button>
+                            <button class="btn btn-secondary" id="btn-step-back">⏮ -1 klatka</button>
+                            <button class="btn btn-secondary" id="btn-step-forward">⏭ +1 klatka</button>
+                        </div>
+                        <div class="timecode-display" id="time-display">00:00.000 / 00:00.000</div>
                     </div>
-                    <div class="steppers">
-                        <button class="btn btn-sm" id="stepBack1s" title="Cofnij o 1 sekundę">-1s</button>
-                        <button class="btn btn-sm" id="stepBack01s" title="Cofnij o 1 klatkę / 0.1s">-0.1s</button>
-                        <button class="btn btn-sm" id="stepForward01s"
-                            title="Do przodu o 1 klatkę / 0.1s">+0.1s</button>
-                        <button class="btn btn-sm" id="stepForward1s" title="Do przodu o 1 sekundę">+1s</button>
-                        <select id="speedSelect" class="select-input"
-                            style="min-width: 80px; padding: 4px 8px; font-size: 12px;">
+                </div>
+
+                <!-- Trim In/Out & Frame Sampler Toolbar -->
+                <div class="trim-toolbar">
+                    <div class="trim-segment">
+                        <label>Marker IN (s):</label>
+                        <input type="number" class="num-input" id="input-marker-in" min="0" step="0.1" value="0.00">
+                        <button class="btn btn-secondary" id="btn-set-in">Ustaw IN (obecny)</button>
+                    </div>
+
+                    <div class="trim-segment">
+                        <label>Marker OUT (s):</label>
+                        <input type="number" class="num-input" id="input-marker-out" min="0" step="0.1" value="10.00">
+                        <button class="btn btn-secondary" id="btn-set-out">Ustaw OUT (obecny)</button>
+                    </div>
+
+                    <div class="interval-slider-wrap" style="flex-direction: column; align-items: flex-start; gap: 6px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label>Krok próbkowania:</label>
+                            <input type="range" id="interval-slider" min="1" max="120" step="1" value="15">
+                            <span id="interval-value" style="font-family: var(--font-mono); font-size: 12px; color: var(--pitch-green); min-width: 130px;">
+                                15 klatek (~0.5s)
+                            </span>
+                        </div>
+                        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-fps-1" style="padding: 3px 8px; font-size: 11px;">⚡ Pełne FPS (co 1 klatkę)</button>
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-fps-5" style="padding: 3px 8px; font-size: 11px;">Co 5 klatek</button>
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-fps-15" style="padding: 3px 8px; font-size: 11px;">Co 15 klatek (~0.5s)</button>
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-fps-30" style="padding: 3px 8px; font-size: 11px;">Co 30 klatek (~1.0s)</button>
+                        </div>
+                    </div>
+
+                    <div style="font-size: 13px; color: var(--text-secondary);">
+                        Szacunkowa liczba klatek: <strong id="frames-count-estimate" style="color: #ffffff;">20</strong>
+                    </div>
+                </div>
+
+                <!-- Action Extraction Bar -->
+                <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 18px; align-items: center;">
+                    <button class="btn btn-primary" id="btn-extract-frames">
+                        📸 Wyodrębnij Klatki (Canvas Frame Grabber)
+                    </button>
+                    <button class="btn btn-secondary" id="btn-download-zip" disabled>
+                        📦 Pobierz Paczkę Klatek (ZIP + Manifest)
+                    </button>
+                    <button class="btn btn-cyan" id="btn-go-module-2" disabled>
+                        Przejdź do Modułu 2 (Ekstrakcja CV) ➔
+                    </button>
+                </div>
+
+                <!-- Extraction Progress Bar -->
+                <div class="progress-container" id="extraction-progress">
+                    <div class="progress-bar-fill" id="extraction-progress-bar"></div>
+                </div>
+
+                <!-- Filmstrip Gallery -->
+                <div class="filmstrip-container">
+                    <div class="filmstrip-header">
+                        <h3 style="font-size: 14px; font-weight: 700; color: #ffffff;">Taśma wyekstrahowanych klatek:</h3>
+                        <span style="font-size: 11px; color: var(--text-muted);">Kliknij klatkę, aby aktywować ją w Module 2</span>
+                    </div>
+                    <div class="filmstrip-gallery" id="filmstrip-gallery">
+                        <!-- Populated dynamically with thumbnail cards -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- =========================================================================
+             MODUŁ 2: DETECT & TRACK ENGINE (BEZKOSZTOWA LOKALNA WIZJA KOMPUTEROWA)
+             ========================================================================= -->
+        <section class="module-section" data-step="2">
+            <div class="card-panel">
+                <div class="panel-header">
+                    <h2>🎯 Moduł 2: Ekstrakcja Danych CV & Rzutowanie Perspektywiczne 2D</h2>
+                    <span class="panel-badge">100% Darmowa Lokalna Analiza</span>
+                </div>
+
+                <!-- Toolbar -->
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button class="btn btn-secondary" id="btn-reset-calib">🔄 Reset Kalibracji Homografii</button>
+                        <button class="btn btn-primary" id="btn-process-frame">⚡ Przetwórz Klatkę (Canvas CV)</button>
+                        <button class="btn btn-secondary" id="btn-gemini-assist">✨ Gemini Flash Assist</button>
+                    </div>
+
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button class="btn btn-secondary" id="btn-export-json">💾 Pobierz match_tracking_data.json</button>
+                        <button class="btn btn-secondary" id="btn-export-csv">📊 Pobierz positions.csv</button>
+                    </div>
+                </div>
+
+                <!-- Module 2 Clip Playback & Scrubbing Controller -->
+                <div class="clip-playback-bar">
+                    <div class="controls-group">
+                        <button class="btn btn-secondary btn-sm" id="m2-btn-first" title="Pierwsza klatka">⏮</button>
+                        <button class="btn btn-secondary btn-sm" id="m2-btn-prev" title="Poprzednia klatka">◀ -1</button>
+                        <button class="btn btn-primary btn-sm" id="m2-btn-play" style="min-width: 180px;">▶ Odtwarzaj wideo/radar 2D</button>
+                        <button class="btn btn-secondary btn-sm" id="m2-btn-next" title="Następna klatka">+1 ▶</button>
+                        <button class="btn btn-secondary btn-sm" id="m2-btn-last" title="Ostatnia klatka">⏭</button>
+                    </div>
+
+                    <div style="flex: 1; display: flex; align-items: center; gap: 10px; min-width: 220px;">
+                        <input type="range" id="m2-frame-slider" min="0" max="0" step="1" value="0" style="flex: 1;">
+                        <span id="m2-frame-info" style="font-family: var(--font-mono); font-size: 12px; color: var(--pitch-green); min-width: 150px; text-align: right;">
+                            Klatka: 0 / 0 (00:00.000)
+                        </span>
+                    </div>
+
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label style="font-size: 11px; color: var(--text-secondary);">Prędkość:</label>
+                        <select id="m2-speed-selector">
+                            <option value="0.25">0.25x</option>
                             <option value="0.5">0.5x</option>
-                            <option value="1.0" selected>1.0x</option>
-                            <option value="1.5">1.5x</option>
-                            <option value="2.0">2.0x</option>
+                            <option value="1" selected>1x</option>
+                            <option value="2">2x</option>
                         </select>
                     </div>
                 </div>
-            </div>
 
-            <!-- Annotation Column -->
-            <div class="annotation-box">
-                <div class="box-title">
-                    <span>⏱️ Oznaczanie Fragmentu</span>
-                </div>
-
-                <!-- Action Buttons: Start / End -->
-                <div class="marker-buttons">
-                    <button class="btn btn-primary" id="setStartButton">
-                        📍 Ustaw początek (I)
-                    </button>
-                    <button class="btn btn-primary" id="setEndButton">
-                        📍 Ustaw koniec (O)
-                    </button>
-                </div>
-
-                <!-- Summary Card -->
-                <div class="summary-card" id="summaryBanner">
-                    <div class="summary-header">
-                        <span class="summary-label">Wybrany przedział:</span>
-                        <span class="badge badge-waiting" id="statusBadge">Ustaw znaczniki</span>
+                <!-- Dual View: Frame Canvas + 2D Pitch Radar -->
+                <div class="dual-view-workspace">
+                    <!-- Left: Active Frame & Drag Calibration Quad -->
+                    <div class="canvas-panel">
+                        <div class="canvas-panel-header">
+                            <span style="font-weight: 700; font-size: 13px;">Klatka Robocza & Kalibracja 4 Punktów Homografii</span>
+                            <span style="font-size: 11px; color: var(--pitch-green);">Przeciągaj punkty narożne P1–P4</span>
+                        </div>
+                        <div class="canvas-wrap">
+                            <canvas id="active-frame-canvas" width="640" height="360"></canvas>
+                        </div>
+                        <div class="calib-instructions">
+                            <span>P1 (Góra-Lewo: 0,0m) • P2 (Góra-Prawo: 105,0m) • P3 (Dół-Prawo: 105,68m) • P4 (Dół-Lewo: 0,68m)</span>
+                        </div>
                     </div>
-                    <div class="summary-times">
-                        <span id="startTimeDisplay">--:--.--</span> &rarr; <span id="endTimeDisplay">--:--.--</span>
+
+                    <!-- Right: 2D Pitch Radar (105m x 68m FIFA Pitch) -->
+                    <div class="canvas-panel">
+                        <div class="canvas-panel-header">
+                            <span style="font-weight: 700; font-size: 13px;">Radar Boiska 2D (105m × 68m FIFA Standard)</span>
+                            <span style="font-size: 11px; color: var(--cyan-home);">Błękit: Home • Koral: Away • Złoto: Piłka</span>
+                        </div>
+                        <div class="canvas-wrap">
+                            <canvas id="pitch-radar-canvas" width="640" height="414"></canvas>
+                        </div>
+                        <div class="calib-instructions">
+                            <span>Współrzędne w metrach [0..105, 0..68] zrzutowane na płaszczyznę taktyczną</span>
+                        </div>
                     </div>
-                    <div class="summary-duration" id="durationDisplay">
-                        Długość: 0.00s
-                    </div>
                 </div>
 
-                <!-- Playback & Reset of Marked Segment -->
-                <div style="display: flex; gap: 8px;">
-                    <button class="btn" style="flex: 1;" id="playSegmentButton">
-                        ▶️ Odtwórz fragment (P)
-                    </button>
-                    <button class="btn" id="resetButton" title="Wyczyść punkty start i koniec">
-                        ↺ Reset
-                    </button>
+                <!-- Numerical Coordinates Table -->
+                <div class="panel-header" style="margin-top: 24px;">
+                    <h2>📋 Tabela Danych Liczbowych i Pozycji Obiektów</h2>
                 </div>
-
-                <!-- Metadata Inputs -->
-                <div class="form-group">
-                    <label for="labelSelect">Typ zdarzenia / Etykieta:</label>
-                    <select id="labelSelect" class="form-control">
-                        <option value="Akcja bramkowa / Gol">⚽ Akcja bramkowa / Gol</option>
-                        <option value="Strzał na bramkę">🎯 Strzał na bramkę</option>
-                        <option value="Faul / Żółta kartka">🟨 Faul / Żółta kartka</option>
-                        <option value="Czerwona kartka">🟥 Czerwona kartka</option>
-                        <option value="Kontratak">⚡ Szybki kontratak</option>
-                        <option value="Rzut rożny">🚩 Rzut rożny</option>
-                        <option value="Rzut wolny">📍 Rzut wolny</option>
-                        <option value="Rzut karny">🥅 Rzut karny</option>
-                        <option value="Wysoki pressing">🛡️ Wysoki pressing</option>
-                        <option value="Podanie kluczowe">👟 Podanie kluczowe</option>
-                        <option value="Inne">📌 Inne</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="notesInput">Notatki / Komentarz analityka:</label>
-                    <input type="text" id="notesInput" class="form-control"
-                        placeholder="np. Dobry ruch bez piłki prawego skrzydłowego...">
-                </div>
-
-                <!-- Save Button -->
-                <button class="btn btn-primary" id="saveSegmentButton"
-                    style="padding: 12px; font-size: 14px; justify-content: center;">
-                    💾 Zatwierdź fragment
-                </button>
-
-                <!-- Keyboard Shortcuts Help -->
-                <div class="shortcut-hint">
-                    <strong>Skróty klawiszowe:</strong><br>
-                    <span class="kbd">Spacja</span> Play/Pauza &nbsp;|&nbsp;
-                    <span class="kbd">I</span> Początek &nbsp;|&nbsp;
-                    <span class="kbd">O</span> Koniec &nbsp;|&nbsp;
-                    <span class="kbd">P</span> Podgląd pętli<br>
-                    <span class="kbd">&larr;</span> / <span class="kbd">&rarr;</span> &plusmn;1s &nbsp;|&nbsp;
-                    <span class="kbd">Shift + &larr; / &rarr;</span> &plusmn;0.1s
+                <div class="data-table-container">
+                    <table class="data-table" id="coordinates-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Zespół / Rola</th>
+                                <th>Kolor Stroju</th>
+                                <th>BBox [x, y, w, h]</th>
+                                <th>Piksele [X, Y]</th>
+                                <th>Boisko [Xm, Ym]</th>
+                                <th>Prędkość Chwilowa</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Populated dynamically -->
+                        </tbody>
+                    </table>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <!-- Saved Clips Table -->
-        <div class="table-card">
-            <div class="table-header-row">
-                <div class="box-title">
-                    <span>📋 Zapisane fragmenty meczu</span>
-                    <span id="segmentsCountBadge" class="brand-tag">0 fragmentów</span>
+        <!-- =========================================================================
+             MODUŁ 3: SYSTEM MATEMATYCZNY & KONTRAKT ANCHOR
+             ========================================================================= -->
+        <section class="module-section" data-step="3">
+            <div class="card-panel">
+                <div class="panel-header">
+                    <h2>📐 Moduł 3: System Matematyczny, Wektory Ruchu & Kontrakt Danych</h2>
+                    <span class="panel-badge">Analityka Przestrzenna</span>
+                </div>
+
+                <!-- Tactical Metrics Cards Grid -->
+                <div class="metrics-grid">
+                    <div class="metric-card home">
+                        <div class="metric-title">Centroid Drużyny Home (Środek Ciężkości)</div>
+                        <div class="metric-value-huge" id="metric-home-centroid">0.0m, 0.0m</div>
+                        <div class="metric-subtext">Współrzędne geometrycznego środka formacji</div>
+                    </div>
+
+                    <div class="metric-card away">
+                        <div class="metric-title">Centroid Drużyny Away (Środek Ciężkości)</div>
+                        <div class="metric-value-huge" id="metric-away-centroid">0.0m, 0.0m</div>
+                        <div class="metric-subtext">Współrzędne geometrycznego środka formacji</div>
+                    </div>
+
+                    <div class="metric-card home">
+                        <div class="metric-title">Zwartość Formacji Home (Compactness)</div>
+                        <div class="metric-value-huge" id="metric-home-compactness">0.0m</div>
+                        <div class="metric-subtext">Średnie odchylenie odległości zawodników od centroidu</div>
+                    </div>
+
+                    <div class="metric-card away">
+                        <div class="metric-title">Zwartość Formacji Away (Compactness)</div>
+                        <div class="metric-value-huge" id="metric-away-compactness">0.0m</div>
+                        <div class="metric-subtext">Średnie odchylenie odległości zawodników od centroidu</div>
+                    </div>
+
+                    <div class="metric-card general">
+                        <div class="metric-title">Rozstaw Linii Drużyny Home</div>
+                        <div class="metric-value-huge" id="metric-home-spread" style="font-size: 16px;">Szer: 0.0m | Dł: 0.0m</div>
+                        <div class="metric-subtext">Szerokość i głębokość formacji na boisku</div>
+                    </div>
+
+                    <div class="metric-card general">
+                        <div class="metric-title">Rozstaw Linii Drużyny Away</div>
+                        <div class="metric-value-huge" id="metric-away-spread" style="font-size: 16px;">Szer: 0.0m | Dł: 0.0m</div>
+                        <div class="metric-subtext">Szerokość i głębokość formacji na boisku</div>
+                    </div>
+
+                    <div class="metric-card general">
+                        <div class="metric-title">Maksymalna Prędkość Akcji</div>
+                        <div class="metric-value-huge" id="metric-max-speed">0.0 km/h</div>
+                        <div class="metric-subtext">Wyliczona z wektorów przemieszczenia Δs / Δt</div>
+                    </div>
+                </div>
+
+                <!-- Voronoi Pitch Control Toggle -->
+                <div style="margin-bottom: 24px; display: flex; gap: 12px; align-items: center;">
+                    <button class="btn btn-cyan" id="btn-toggle-voronoi">
+                        🌐 Włącz mapę kontroli przestrzeni (Voronoi)
+                    </button>
+                    <span style="font-size: 12px; color: var(--text-secondary);">
+                        Generuje diagram Voronoja dominacji przestrzennej Home vs Away na radarze 2D.
+                    </span>
+                </div>
+
+                <!-- Data Contract & Live JSON Schema Viewer -->
+                <div class="panel-header">
+                    <h2>📄 Kontrakt Danych (JSON Schema & Live Output)</h2>
+                    <button class="btn btn-secondary" id="btn-copy-json">📋 Kopiuj JSON</button>
+                </div>
+
+                <div class="schema-box" id="json-schema-viewer">
+// Wybierz lub wyodrębnij klatkę, aby zobaczyć wygenerowany ustrukturyzowany zbiór danych.
                 </div>
             </div>
+        </section>
 
-            <div class="table-responsive">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Wideo</th>
-                            <th>Etykieta</th>
-                            <th>Początek</th>
-                            <th>Koniec</th>
-                            <th>Długość</th>
-                            <th>Notatki</th>
-                            <th style="text-align: right;">Akcje</th>
-                        </tr>
-                    </thead>
-                    <tbody id="segmentsTableBody">
-                        <tr>
-                            <td colspan="7" class="empty-state">
-                                Brak zapisanych fragmentów. Oznacz początek i koniec, a następnie kliknij "Zatwierdź
-                                fragment".
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+    </main>
+
+    <!-- Modal: Gemini Flash Assist -->
+    <div class="modal-overlay" id="gemini-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>✨ Gemini Flash Assist (Mikro-weryfikacja klatki)</h3>
+                <button class="close-btn" id="btn-close-modal">&times;</button>
+            </div>
+            <div style="font-size: 13px; line-height: 1.6; color: var(--text-secondary);">
+                <p style="margin-bottom: 12px;">
+                    Zgodnie z założeniami <strong>PitchLab</strong>, główny silnik analizy działa <strong>w 100% lokalnie i bezkosztowo</strong> w Twojej przeglądarce za pomocą Canvas Image Processing i homografii.
+                </p>
+                <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px; font-family: var(--font-mono); font-size: 11px; color: var(--pitch-green);">
+                    Prompt Vision: "Analyze football pitch frame, return bounding boxes [ymin, xmin, ymax, xmax] of players, ball, and team classification in JSON."
+                </div>
+                <p style="margin-bottom: 16px;">
+                    Lokalny silnik PitchLab zwrócił precyzyjne współrzędne <strong>105m × 68m</strong> z zerowym kosztem API i zerowym opóźnieniem sieciowym!
+                </p>
+                <div style="text-align: right;">
+                    <button class="btn btn-primary" onclick="document.getElementById('gemini-modal').classList.remove('active')">
+                        Rozumiem, kontynuuj z lokalnym silnikiem CV
+                    </button>
+                </div>
             </div>
         </div>
     </div>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            let currentVideoId = null;
-            let startTime = 0;
-            let endTime = 0;
-            let segmentWatcherAttached = false;
-
-            const videoPlayer = document.getElementById('videoPlayer');
-            const currentTimer = document.getElementById('currentTimer');
-            const totalDuration = document.getElementById('totalDuration');
-            const videoSelect = document.getElementById('videoSelect');
-            const labelSelect = document.getElementById('labelSelect');
-            const notesInput = document.getElementById('notesInput');
-            const statusBadge = document.getElementById('statusBadge');
-            const startTimeDisplay = document.getElementById('startTimeDisplay');
-            const endTimeDisplay = document.getElementById('endTimeDisplay');
-            const durationDisplay = document.getElementById('durationDisplay');
-            const fileInput = document.getElementById('fileInput');
-            const selectFileBtn = document.getElementById('selectFileBtn');
-            const uploadStatusText = document.getElementById('uploadStatusText');
-            const segmentsTableBody = document.getElementById('segmentsTableBody');
-            const segmentsCountBadge = document.getElementById('segmentsCountBadge');
-            const speedSelect = document.getElementById('speedSelect');
-
-            function formatTimestamp(seconds) {
-                if (isNaN(seconds) || seconds === null || seconds < 0) seconds = 0;
-                const minutes = Math.floor(seconds / 60);
-                const secs = Math.floor(seconds % 60);
-                const centiseconds = Math.floor((seconds % 1) * 100);
-                return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(centiseconds).padStart(2, '0')}`;
-            }
-
-            // Load Video Catalog
-            async function loadVideoList(autoSelectId = null) {
-                try {
-                    const response = await fetch('/api/videos');
-                    const videos = await response.json();
-                    videoSelect.innerHTML = '';
-
-                    if (videos.length === 0) {
-                        const opt = document.createElement('option');
-                        opt.value = '';
-                        opt.textContent = 'Brak wideo w data/videos i data/raw';
-                        videoSelect.appendChild(opt);
-                        return;
-                    }
-
-                    videos.forEach(video => {
-                        const opt = document.createElement('option');
-                        opt.value = video.id;
-                        opt.textContent = `${video.filename} (${(video.size_bytes / (1024 * 1024)).toFixed(1)} MB)`;
-                        videoSelect.appendChild(opt);
-                    });
-
-                    const targetId = autoSelectId || (videos.length > 0 ? videos[0].id : null);
-                    if (targetId && (!currentVideoId || autoSelectId)) {
-                        videoSelect.value = targetId;
-                        loadVideo(targetId);
-                    }
-                } catch (err) {
-                    console.error('Błąd wczytywania listy wideo:', err);
-                }
-            }
-
-            function loadVideo(videoId) {
-                if (!videoId) return;
-                currentVideoId = videoId;
-                videoPlayer.src = `/api/video/${videoId}/stream`;
-                videoPlayer.load();
-                resetMarkers();
-                loadSegments();
-            }
-
-            // File Upload
-            selectFileBtn.addEventListener('click', () => fileInput.click());
-
-            fileInput.addEventListener('change', async () => {
-                const file = fileInput.files[0];
-                if (!file) return;
-
-                uploadStatusText.textContent = `Wysyłanie: ${file.name}...`;
-                const formData = new FormData();
-                formData.append('file', file);
-
-                try {
-                    const res = await fetch('/api/upload', {
-                        method: 'POST',
-                        body: formData
-                    });
-                    if (!res.ok) {
-                        const err = await res.json();
-                        throw new Error(err.detail || 'Błąd uploadu');
-                    }
-                    const data = await res.json();
-                    uploadStatusText.textContent = `Wgrano pomyślnie: ${data.filename}`;
-                    await loadVideoList(data.id);
-                    fileInput.value = '';
-                } catch (err) {
-                    alert('Błąd przesyłania pliku: ' + err.message);
-                    uploadStatusText.textContent = 'Błąd uploadu';
-                }
-            });
-
-            document.getElementById('loadVideoButton').addEventListener('click', () => {
-                loadVideo(videoSelect.value);
-            });
-
-            // Player time updates
-            videoPlayer.addEventListener('timeupdate', () => {
-                currentTimer.textContent = formatTimestamp(videoPlayer.currentTime);
-            });
-
-            videoPlayer.addEventListener('loadedmetadata', () => {
-                totalDuration.textContent = formatTimestamp(videoPlayer.duration);
-            });
-
-            // Steppers
-            document.getElementById('stepBack1s').addEventListener('click', () => { videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - 1); });
-            document.getElementById('stepBack01s').addEventListener('click', () => { videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - 0.1); });
-            document.getElementById('stepForward01s').addEventListener('click', () => { videoPlayer.currentTime = Math.min(videoPlayer.duration || 9999, videoPlayer.currentTime + 0.1); });
-            document.getElementById('stepForward1s').addEventListener('click', () => { videoPlayer.currentTime = Math.min(videoPlayer.duration || 9999, videoPlayer.currentTime + 1); });
-
-            speedSelect.addEventListener('change', () => {
-                videoPlayer.playbackRate = parseFloat(speedSelect.value);
-            });
-
-            // Markers & Summary
-            function setStart() {
-                startTime = Math.round(videoPlayer.currentTime * 100) / 100;
-                updateSummary();
-            }
-
-            function setEnd() {
-                endTime = Math.round(videoPlayer.currentTime * 100) / 100;
-                updateSummary();
-            }
-
-            function resetMarkers() {
-                startTime = 0;
-                endTime = 0;
-                updateSummary();
-            }
-
-            function updateSummary() {
-                startTimeDisplay.textContent = formatTimestamp(startTime);
-                endTimeDisplay.textContent = endTime > 0 ? formatTimestamp(endTime) : '--:--.--';
-
-                if (endTime > startTime) {
-                    const diff = (endTime - startTime).toFixed(2);
-                    durationDisplay.textContent = `Długość: ${diff}s`;
-                    statusBadge.className = 'badge badge-ready';
-                    statusBadge.textContent = 'Gotowy do zapisu';
-                } else if (endTime === 0) {
-                    durationDisplay.textContent = 'Oczekiwanie na znacznik końca...';
-                    statusBadge.className = 'badge badge-waiting';
-                    statusBadge.textContent = 'Ustaw koniec';
-                } else {
-                    durationDisplay.textContent = 'Błąd: Koniec musi być większy niż początek';
-                    statusBadge.className = 'badge badge-error';
-                    statusBadge.textContent = 'Niepoprawny zakres';
-                }
-            }
-
-            document.getElementById('setStartButton').addEventListener('click', setStart);
-            document.getElementById('setEndButton').addEventListener('click', setEnd);
-            document.getElementById('resetButton').addEventListener('click', resetMarkers);
-
-            // Play Selected Segment
-            function playSegment(startSec = startTime, endSec = endTime) {
-                if (endSec <= startSec) {
-                    alert('Ustaw poprawny zakres (koniec > początek).');
-                    return;
-                }
-                videoPlayer.currentTime = startSec;
-                videoPlayer.play();
-
-                const onSegmentTimeUpdate = () => {
-                    if (videoPlayer.currentTime >= endSec) {
-                        videoPlayer.pause();
-                        videoPlayer.removeEventListener('timeupdate', onSegmentTimeUpdate);
-                    }
-                };
-                videoPlayer.addEventListener('timeupdate', onSegmentTimeUpdate);
-            }
-
-            document.getElementById('playSegmentButton').addEventListener('click', () => {
-                playSegment(startTime, endTime);
-            });
-
-            // Save Segment
-            async function saveSegment() {
-                if (!currentVideoId) {
-                    alert('Wybierz lub załaduj wideo!');
-                    return;
-                }
-                if (endTime <= startTime) {
-                    alert('Niepoprawny zakres czasowy! Ustaw początek i koniec tak, aby koniec > początek.');
-                    return;
-                }
-
-                const payload = {
-                    video_id: currentVideoId,
-                    start_time: startTime,
-                    end_time: endTime,
-                    label: labelSelect.value,
-                    notes: notesInput.value.trim()
-                };
-
-                try {
-                    const response = await fetch('/api/segments', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-
-                    if (!response.ok) {
-                        const err = await response.json();
-                        throw new Error(err.detail || 'Błąd zapisu fragmentu');
-                    }
-
-                    notesInput.value = '';
-                    resetMarkers();
-                    await loadSegments();
-                } catch (err) {
-                    alert('Błąd podczas zapisywania: ' + err.message);
-                }
-            }
-
-            document.getElementById('saveSegmentButton').addEventListener('click', saveSegment);
-
-            // Load and Render Segments
-            async function loadSegments() {
-                try {
-                    const response = await fetch('/api/segments');
-                    const segments = await response.json();
-
-                    segmentsCountBadge.textContent = `${segments.length} fragmentów`;
-                    segmentsTableBody.innerHTML = '';
-
-                    if (segments.length === 0) {
-                        segmentsTableBody.innerHTML = `
-                            <tr>
-                                <td colspan="7" class="empty-state">
-                                    Brak zapisanych fragmentów. Oznacz początek i koniec, a następnie kliknij "Zatwierdź fragment".
-                                </td>
-                            </tr>
-                        `;
-                        return;
-                    }
-
-                    segments.forEach(seg => {
-                        const tr = document.createElement('tr');
-                        tr.innerHTML = `
-                            <td style="font-weight: 500;">${seg.video_name}</td>
-                            <td><span class="tag-pill">${seg.label}</span></td>
-                            <td style="font-family: 'JetBrains Mono', monospace;">${seg.start_formatted}</td>
-                            <td style="font-family: 'JetBrains Mono', monospace;">${seg.end_formatted}</td>
-                            <td style="font-family: 'JetBrains Mono', monospace; color: var(--sky-blue); font-weight: 600;">${seg.duration}s</td>
-                            <td style="color: var(--text-secondary); max-width: 200px; word-break: break-word;">${seg.notes || '-'}</td>
-                            <td style="text-align: right; white-space: nowrap;">
-                                <button class="btn btn-sm" onclick="window.playClip(${seg.start_time}, ${seg.end_time}, '${seg.video_id}')">▶️ Odtwórz</button>
-                                <button class="btn btn-sm btn-danger" onclick="window.deleteClip('${seg.id}')">🗑️ Usuń</button>
-                            </td>
-                        `;
-                        segmentsTableBody.appendChild(tr);
-                    });
-                } catch (err) {
-                    console.error('Błąd pobierania fragmentów:', err);
-                }
-            }
-
-            window.playClip = (start, end, videoId) => {
-                if (currentVideoId !== videoId) {
-                    loadVideo(videoId);
-                    videoPlayer.addEventListener('loadeddata', () => {
-                        playSegment(start, end);
-                    }, { once: true });
-                } else {
-                    playSegment(start, end);
-                }
-            };
-
-            window.deleteClip = async (segmentId) => {
-                if (!confirm('Czy na pewno chcesz usunąć ten fragment?')) return;
-                try {
-                    const res = await fetch(`/api/segments/${segmentId}`, { method: 'DELETE' });
-                    if (res.ok) {
-                        await loadSegments();
-                    }
-                } catch (err) {
-                    alert('Błąd usuwania fragmentu: ' + err.message);
-                }
-            };
-
-            // Export JSON
-            document.getElementById('exportJsonButton').addEventListener('click', async () => {
-                try {
-                    const res = await fetch('/api/segments/export');
-                    const data = await res.json();
-                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `pitchlab_segments_${new Date().toISOString().slice(0, 10)}.json`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                } catch (err) {
-                    alert('Błąd eksportu JSON: ' + err.message);
-                }
-            });
-
-            // Keyboard Shortcuts
-            document.addEventListener('keydown', (e) => {
-                if (document.activeElement === notesInput) return;
-
-                if (e.code === 'Space') {
-                    e.preventDefault();
-                    if (videoPlayer.paused) {
-                        videoPlayer.play();
-                    } else {
-                        videoPlayer.pause();
-                    }
-                } else if (e.code === 'KeyI' || e.code === 'BracketLeft') {
-                    setStart();
-                } else if (e.code === 'KeyO' || e.code === 'BracketRight') {
-                    setEnd();
-                } else if (e.code === 'KeyP') {
-                    playSegment(startTime, endTime);
-                } else if (e.code === 'ArrowLeft') {
-                    e.preventDefault();
-                    const step = e.shiftKey ? 0.1 : 1.0;
-                    videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - step);
-                } else if (e.code === 'ArrowRight') {
-                    e.preventDefault();
-                    const step = e.shiftKey ? 0.1 : 1.0;
-                    videoPlayer.currentTime = Math.min(videoPlayer.duration || 9999, videoPlayer.currentTime + step);
-                }
-            });
-
-            // Startup
-            loadVideoList();
-            loadSegments();
-        });
-    </script>
+    <!-- Scripts -->
+    <script src="/static/cv_engine.js"></script>
+    <script src="/static/app.js"></script>
 </body>
-
 </html>

@@ -690,3 +690,37 @@ table.data-table tr:hover td {
     background: linear-gradient(90deg, var(--pitch-green), var(--cyan-home));
     transition: width 0.15s ease;
 }
+
+/* Module 2 Clip Playback & Scrubbing Bar */
+.clip-playback-bar {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    margin-bottom: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+}
+
+.clip-playback-bar .controls-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.clip-playback-bar input[type="range"] {
+    accent-color: var(--cyan-home);
+    cursor: pointer;
+}
+
+.clip-playback-bar select {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: #ffffff;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}

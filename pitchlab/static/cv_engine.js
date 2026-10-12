@@ -23,8 +23,8 @@ window.PitchLabCV = (function() {
                 const dx = dstPts[i].x !== undefined ? dstPts[i].x : dstPts[i][0];
                 const dy = dstPts[i].y !== undefined ? dstPts[i].y : dstPts[i][1];
 
-                A.push([-sx, -sy, -1, 0, 0, 0, sx * dx, sy * dx, dx]);
-                A.push([0, 0, 0, -sx, -sy, -1, sx * dy, sy * dy, dy]);
+                A.push([sx, sy, 1, 0, 0, 0, -sx * dx, -sy * dx, dx]);
+                A.push([0, 0, 0, sx, sy, 1, -sx * dy, -sy * dy, dy]);
             }
 
             const h = this.gaussianElimination(A);
@@ -105,7 +105,7 @@ window.PitchLabCV = (function() {
 
         projectBack: function(H_inv, pitchX, pitchY) {
             if (!H_inv) return { px: 0, py: 0 };
-            let denom = H_inv[6] * pitchX + H_inv[7] * pitchY + 1;
+            let denom = H_inv[6] * pitchX + H_inv[7] * pitchY + (H_inv[8] !== undefined ? H_inv[8] : 1);
             if (Math.abs(denom) < 1e-6) denom = 1e-6;
             const px = (H_inv[0] * pitchX + H_inv[1] * pitchY + H_inv[2]) / denom;
             const py = (H_inv[3] * pitchX + H_inv[4] * pitchY + H_inv[5]) / denom;
