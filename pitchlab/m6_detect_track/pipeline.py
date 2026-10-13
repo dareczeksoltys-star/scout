@@ -4,7 +4,7 @@ import logging
 import math
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Sequence
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -12,6 +12,15 @@ import numpy as np
 from pitchlab.core.config import M6Config
 from pitchlab.core.io import VideoReader, save_tracks_parquet
 from pitchlab.core.types import Track2D
+from pitchlab.core.pitch_model import PitchModel
+from pitchlab.calibration.line_detector import (
+    detect_pitch_mask,
+    detect_line_mask,
+    detect_line_segments,
+    compute_distance_transform,
+    exclude_people_mask,
+)
+from pitchlab.calibration.camera_model import PTZCamera, fit_ptz_to_line_dt
 from pitchlab.m6_detect_track.ball_tracker import BallKalmanTracker
 from pitchlab.m6_detect_track.detector import YOLOSAHIDetector
 from pitchlab.m6_detect_track.interpolation import interpolate_ball_gaps
@@ -20,23 +29,16 @@ from pitchlab.m6_detect_track.tracker import ByteTrackWrapper
 logger = logging.getLogger(__name__)
 
 
+# ----------------------------------------------------------------------
+# GŁÓWNA FUNKCJA PIPELINU M6 (używana np. w CLI / testach)
+# ----------------------------------------------------------------------
 def run_m6_pipeline(
     video_path: str | Path,
     cfg: M6Config,
     output_path: str | Path | None = None,
     max_frames: int | None = None,
 ) -> list[Track2D]:
-    """Runs end-to-end detection, multi-person tracking, ball tracking and interpolation.
-
-    Args:
-        video_path: Path to source video file.
-        cfg: Module 6 configuration dataclass.
-        output_path: Optional path to save Parquet output.
-        max_frames: Optional max frames to process (useful for testing).
-
-    Returns:
-        List of Track2D records.
-    """
+    """Runs end-to-end detection, multi-person tracking, ball tracking and interpolation."""
     video_path = Path(video_path)
     logger.info("Starting M6 pipeline on video: %s", video_path)
 
@@ -81,6 +83,9 @@ def run_m6_pipeline(
     return processed_tracks
 
 
+# ----------------------------------------------------------------------
+# KONFIGURACJA SEGMENTU (stałe)
+# ----------------------------------------------------------------------
 PITCH_LENGTH = 105.0
 PITCH_WIDTH = 68.0
 MAX_ANALYSIS_FRAMES = 150
@@ -94,12 +99,11 @@ def _cfg_value(cfg: Any, *names: str, default: Any = None) -> Any:
     return default
 
 
+# ----------------------------------------------------------------------
+# ADAPTERY DETEKTORA/TRACKERA (fallback syntetyczny / Ultralytics)
+# ----------------------------------------------------------------------
 class _SegmentDetector:
-    """Ultralytics adapter exposing detect(frame, frame_idx).
-
-    If your existing M6 detector already exposes that interface, replace this
-    adapter in _make_segment_components().
-    """
+    """Ultralytics adapter exposing detect(frame, frame_idx)."""
 
     def __init__(self, cfg: Any) -> None:
         import torch
@@ -118,7 +122,6 @@ class _SegmentDetector:
         elif requests_cuda and not torch.cuda.is_available():
             device = "cpu"
 
-        # Adapt these attribute names to your M6Config if necessary.
         weights = _cfg_value(
             cfg,
             "model_path",
@@ -173,11 +176,7 @@ class _SegmentDetector:
 
 
 class _SegmentTracker:
-    """Lightweight centroid association.
-
-    Replace with your existing M6 player/ball trackers for production-quality
-    identity preservation through occlusions.
-    """
+    """Lightweight centroid association (fallback)."""
 
     def __init__(self, max_missing: int = 8) -> None:
         self.next_id = 1
@@ -214,10 +213,7 @@ class _SegmentTracker:
         assigned_detections: dict[int, int] = {}
 
         for _, track_id, detection_idx in sorted(candidates):
-            if (
-                track_id in assigned_tracks
-                or detection_idx in assigned_detections
-            ):
+            if track_id in assigned_tracks or detection_idx in assigned_detections:
                 continue
             assigned_tracks.add(track_id)
             assigned_detections[detection_idx] = track_id
@@ -248,9 +244,370 @@ def _make_segment_components(cfg: Any) -> tuple[Any, Any, Any]:
     return _SegmentDetector(cfg), _SegmentTracker(), _SegmentTracker()
 
 
+# ----------------------------------------------------------------------
+# KALIBRACJA PIERWSZEJ KLATKI ( "AI NA STARCIE" )
+# ----------------------------------------------------------------------
+def _calibrate_first_frame(
+    frame_bgr: np.ndarray,
+    pitch_model: PitchModel,
+) -> Optional[PTZCamera]:
+    """
+    Uruchamia pełny łańcuch: Mask Trava -> Mask Linii -> Szkielet -> Hough -> DT -> Optymalizacja PTZ.
+    Zwraca skalibrowaną kamerę PTZCamera lub None jeśli kalibracja się nie udała.
+    """
+    h, w = frame_bgr.shape[:2]
+    logger.info("🎯 [Calib] Rozpoczynam kalibrację na pierwszej klatce (%dx%d)...", w, h)
+
+    try:
+        # 1. Maska trawy
+        pitch_mask = detect_pitch_mask(frame_bgr)
+        if pitch_mask.sum() < 1000:
+            logger.warning("🎯 [Calib] Za mała maska trawy, pomijam kalibrację.")
+            return None
+
+        # 2. Wykluczenie ludzi/napisów
+        exclusion_mask = exclude_people_mask(frame_bgr, pitch_mask)
+
+        # 3. Maska linii
+        line_mask = detect_line_mask(frame_bgr, pitch_mask, exclusion_mask)
+
+        # 4. Segmenty linii (Hough na szkieletyzacji)
+        segments = detect_line_segments(line_mask, min_length=max(20.0, min(w, h) * 0.05))
+        logger.info("🎯 [Calib] Wykryto %d segmentów linii.", len(segments))
+
+        if len(segments) < 10:
+            logger.warning("🎯 [Calib] Za mało segmentów linii (%d), kalibracja niestabilna.", len(segments))
+            # Można tu wrócić do domyślnej kamery zamiast None
+            return None
+
+        # 5. Mapa odległości (Distance Transform)
+        dt_map = compute_distance_transform(line_mask)
+
+        # 6. Punkty modelu boiska do sample'owania (gęste punkty na liniach)
+        # Używamy gęstej siatki dla optymalizatora Chamfer
+        pitch_points = pitch_model.sample_line_points(density=0.5)  # co 0.5m
+
+        # 7. Inicjalna kamera (domyślna, przybliżona)
+        # Ustawiamy fokał na podstawie szerokości obrazu (heurystyka broadcast)
+        init_focal = max(w, h) * 1.2
+        init_cam = PTZCamera(
+            x=52.5, y=-22.0, z=16.0,  # Pozycja standardowa tribuna główna
+            pan=0.0, tilt=0.38, roll=0.0,
+            focal_length=init_focal,
+            image_width=w, image_height=h
+        )
+
+        # 8. Optymalizacja (Fit PTZ to Distance Transform)
+        # To jest moment "AI" - dopasowanie modelu 3D do obrazu 2D
+        fitted_cam, chamfer_err = fit_ptz_to_line_dt(
+            dt_map=dt_map,
+            sampled_pitch_points=pitch_points,
+            init_camera=init_cam,
+            maxiter=300
+        )
+
+        logger.info(
+            "✅ [Calib] Kalibracja zakończona sukcesem. Błąd Chamfer: %.2f px | Pan: %.3f Tilt: %.3f F: %.1f",
+            chamfer_err, fitted_cam.pan, fitted_cam.tilt, fitted_cam.focal_length
+        )
+        return fitted_cam
+
+    except Exception as e:
+        logger.error("💥 [Calib] Błąd krytyczny podczas kalibracji pierwszej klatki: %s", e, exc_info=True)
+        return None
+
+
+# ----------------------------------------------------------------------
+# ANALIZA SEGMENTU WIDEO (GŁÓWNY ENTRY POINT DLA SERWERA/BACKENDU)
+# ----------------------------------------------------------------------
+def analyze_video_segment(
+    video_path: str | Path,
+    start_time: float,
+    end_time: float,
+    cfg: M6Config | None = None,
+    output_dir: str | Path | None = None,
+    segment_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Analizuje segment wideo [start_time, end_time).
+    KROK 1 (Klata 0): Kalibracja boiska (PTZ + Homografia) przez detekcję linii.
+    KROK 2 (Klatki 1..N): Detekcja YOLO + Tracking + Rzutowanie na boisko przez uzyskaną Homografię.
+    """
+    start_time = float(start_time)
+    end_time = float(end_time)
+    if (
+        not math.isfinite(start_time)
+        or not math.isfinite(end_time)
+        or start_time < 0
+        or end_time <= start_time
+    ):
+        raise ValueError("Require finite times with 0 <= start_time < end_time")
+
+    video_path = Path(video_path)
+    if not video_path.is_file():
+        raise FileNotFoundError(f"Video not found: {video_path}")
+
+    if output_dir is not None:
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    if cfg is None:
+        try:
+            cfg = M6Config()
+        except Exception:
+            logger.warning("Default M6 config unavailable; using demo defaults")
+            cfg = SimpleNamespace(
+                model_path="yolov8n.pt",
+                device="cpu",
+                conf_threshold=0.20,
+                imgsz=640,
+            )
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        cap.release()
+        raise ValueError("Video could not be opened")
+
+    frames: list[dict[str, Any]] = []
+    sample_metadata: list[tuple[int, int, int]] = []
+    synthetic = False
+    fallback_reason: str | None = None
+
+    # --- STAN KALIBRACJI ---
+    pitch_model = PitchModel()
+    camera: Optional[PTZCamera] = None
+    homography_img2pitch: Optional[np.ndarray] = None  # 3x3 matrix
+    calibration_frame_idx: int = -1
+
+    try:
+        fps = float(cap.get(cv2.CAP_PROP_FPS))
+        fps_estimated = not math.isfinite(fps) or fps <= 0
+        if fps_estimated:
+            fps = 25.0
+
+        start_frame = int(start_time * fps)
+        end_frame = int(end_time * fps)
+        if end_frame <= start_frame:
+            raise ValueError("Segment contains no complete frame interval")
+
+        raw_frame_count = float(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if math.isfinite(raw_frame_count) and raw_frame_count > 0:
+            end_frame = min(end_frame, int(raw_frame_count))
+        if start_frame >= end_frame:
+            raise ValueError("Segment starts beyond the available video")
+
+        sample_rate = max(
+            2 if fps >= 25 else 1,
+            math.ceil((end_frame - start_frame) / MAX_ANALYSIS_FRAMES),
+        )
+
+        detector = tracker = ball_tracker = None
+
+        def enable_fallback(exc: Exception) -> None:
+            nonlocal synthetic, fallback_reason, frames
+            synthetic = True
+            fallback_reason = type(exc).__name__
+            logger.warning(
+                "M6 unavailable; using synthetic segment analysis", exc_info=True
+            )
+            frames = [
+                _synthetic_frame(idx, fps, start_time, width, height)
+                for idx, width, height in sample_metadata
+            ]
+
+        # Seek do początku segmentu
+        if start_frame:
+            if not cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame):
+                raise ValueError("Video backend could not seek to segment")
+
+        absolute_idx = start_frame
+        relative_idx = 0
+
+        while absolute_idx < end_frame and len(frames) < MAX_ANALYSIS_FRAMES:
+            # Sample rate logic
+            if relative_idx % sample_rate:
+                if not cap.grab():
+                    break
+                absolute_idx += 1
+                relative_idx += 1
+                continue
+
+            ok, frame = cap.read()
+            if not ok:
+                break
+
+            height, width = frame.shape[:2]
+            sample_metadata.append((relative_idx, width, height))
+
+            # ---------------------------------------------------------
+            # TRYB SYNTETYCZNY (fallback)
+            # ---------------------------------------------------------
+            if synthetic:
+                frames.append(
+                    _synthetic_frame(relative_idx, fps, start_time, width, height)
+                )
+                absolute_idx += 1
+                relative_idx += 1
+                continue
+
+            # ---------------------------------------------------------
+            # TRYB RZECZYWISTY (YOLO + Tracking + Kalibracja)
+            # ---------------------------------------------------------
+            try:
+                # Lazy init detektorów YOLO/ByteTrack
+                if detector is None:
+                    detector, tracker, ball_tracker = _make_segment_components(cfg)
+
+                # ======================================================
+                # KROK KLUCZOWY: KALIBRACJA NA PIERWSZEJ KLATCE
+                # ======================================================
+                if camera is None:
+                    logger.info("🚀 [Pipeline] Pierwsza klatka segmentu (rel_idx=%d) -> URUCHAMIAM KALIBRACJE BOISKA", relative_idx)
+                    camera = _calibrate_first_frame(frame, pitch_model)
+                    
+                    if camera is not None:
+                        homography_img2pitch = camera.get_homography_img2pitch()
+                        calibration_frame_idx = relative_idx
+                        logger.info("✅ [Pipeline] Homografia img->pitch ustalona na klatce %d.", relative_idx)
+                    else:
+                        logger.error("❌ [Pipeline] KALIBRACJA NIE UDAŁA SIĘ. Przełączam na tryb syntetyczny/fallback.")
+                        enable_fallback(RuntimeError("Calibration failed on first frame"))
+                        # Pętla while skonczy ta iterację jako synthetic
+                        continue 
+
+                # -----------------------------------------------------
+                # DETEKCJA I TRACKING (YOLO + ByteTrack)
+                # -----------------------------------------------------
+                detections = detector.detect(frame, relative_idx)
+                
+                player_dets = [d for d in detections if d["kind"] == "player"]
+                ball_dets = [d for d in detections if d["kind"] == "ball"]
+                
+                # Limit 1 piłka
+                ball_dets = sorted(ball_dets, key=lambda d: d["conf"], reverse=True)[:1]
+
+                player_tracks = tracker.update(player_dets, relative_idx, frame.shape)
+                ball_tracks = ball_tracker.update(ball_dets, relative_idx, frame.shape)
+
+                # -----------------------------------------------------
+                # PROJEKCJA NA BOISKO (używamy HOMOGRAFII z kalibracji)
+                # -----------------------------------------------------
+                players_out = []
+                for track in player_tracks:
+                    x1, y1, x2, y2 = track["bbox"]
+                    # Punkt stóp (środek dolnej krawędzi bbox)
+                    foot_x = (x1 + x2) / 2.0
+                    foot_y = y2
+                    
+                    # Rzutowanie punktu z pikseli na boisko (metry)
+                    pitch_pt, valid = camera.project_points_checked(
+                        np.array([[foot_x, foot_y]], dtype=np.float64)
+                    )
+                    
+                    if not valid[0]:
+                        # Punkt za kamerą lub błąd rzutowania - pomijamy lub clampujemy
+                        # Tu decydujemy: pomijamy zawodnika poza widokiem kamery
+                        continue
+
+                    px, py = pitch_pt[0]
+                    track_id = int(track["track_id"])
+                    team = (
+                        "referee"
+                        if track.get("label") == "referee"
+                        else ("A" if track_id % 2 else "B")
+                    )
+                    
+                    players_out.append(
+                        {
+                            "track_id": track_id,
+                            "team": team,
+                            "x": round(float(px), 3),
+                            "y": round(float(py), 3),
+                            "bbox": track["bbox"],  # zachowujemy bbox w pikselach do debug/overlay
+                            "conf": float(track["conf"]),
+                        }
+                    )
+
+                # Piłka - środek bbox
+                ball_out = None
+                if ball_tracks:
+                    track = ball_tracks[0]
+                    x1, y1, x2, y2 = track["bbox"]
+                    center_x = (x1 + x2) / 2.0
+                    center_y = (y1 + y2) / 2.0
+                    
+                    pitch_pt, valid = camera.project_points_checked(
+                        np.array([[center_x, center_y]], dtype=np.float64)
+                    )
+                    
+                    if valid[0]:
+                        bx, by = pitch_pt[0]
+                        ball_out = {
+                            "x": round(float(bx), 3),
+                            "y": round(float(by), 3),
+                            "bbox": track["bbox"],
+                            "conf": float(track["conf"]),
+                        }
+
+                frames.append(
+                    {
+                        "frame_idx": relative_idx,
+                        "timestamp": round(start_time + relative_idx / fps, 2),
+                        "players": players_out,
+                        "ball": ball_out,
+                    }
+                )
+
+            except Exception as exc:
+                enable_fallback(exc)
+
+            absolute_idx += 1
+            relative_idx += 1
+
+    finally:
+        cap.release()
+
+    if not frames:
+        raise ValueError("No readable frames in the requested segment")
+
+    unique_players = {
+        player["track_id"]
+        for frame in frames
+        for player in frame["players"]
+        if player["team"] != "referee"
+    }
+    ball_frames = sum(frame["ball"] is not None for frame in frames)
+
+    return {
+        "segment_id": segment_id or "segment",
+        "start_time": start_time,
+        "end_time": end_time,
+        "duration": round(end_time - start_time, 2),
+        "fps": fps,
+        "total_frames": len(frames),
+        "frames": frames,
+        "calibration_frame": calibration_frame_idx,  # Info dla frontendu
+        "stats": {
+            "tracked_players_count": len(unique_players),
+            "ball_detection_rate": (
+                0.0 if synthetic else round(100 * ball_frames / len(frames), 2)
+            ),
+            "ball_presence_rate": round(100 * ball_frames / len(frames), 2),
+        },
+        "synthetic": synthetic,
+        "fallback_reason": fallback_reason,
+        "sample_rate": sample_rate,
+        "fps_estimated": fps_estimated,
+        "coordinate_mapping": "homography_ptz" if not synthetic else "normalized_video",
+    }
+
+
+# ----------------------------------------------------------------------
+# GENERATOR KLATEK SYNTETYCZNYCH (fallback / demo)
+# ----------------------------------------------------------------------
 def _pitch_point(
     x: float, y: float, width: int, height: int
 ) -> tuple[float, float]:
+    """Fallback mapping (normalized) - używany tylko w trybie synthetic."""
     return (
         round(float(np.clip(x / width, 0, 1)) * PITCH_LENGTH, 3),
         round(float(np.clip(y / height, 0, 1)) * PITCH_WIDTH, 3),
@@ -265,7 +622,6 @@ def _pixel_bbox(
     *,
     ball: bool = False,
 ) -> list[float]:
-    """Create a demo bbox whose feet/center maps to (x, y) on the pitch."""
     px = x / PITCH_LENGTH * width
     py = y / PITCH_WIDTH * height
 
@@ -295,11 +651,9 @@ def _synthetic_frame(
     width: int,
     height: int,
 ) -> dict[str, Any]:
-    """Smooth, deterministic demo movement: 22 players, referee, and passes."""
     elapsed = frame_idx / fps
     players = []
 
-    # Formation positions are mirrored for the opposing team.
     formation = [
         (7, 34),
         (23, 10), (23, 26), (23, 42), (23, 58),
@@ -329,7 +683,6 @@ def _synthetic_frame(
                     "x": round(x, 3),
                     "y": round(y, 3),
                     "bbox": _pixel_bbox(x, y, width, height),
-                    # Zero confidence: this is simulated, not detected.
                     "conf": 0.0,
                 }
             )
@@ -347,7 +700,6 @@ def _synthetic_frame(
         }
     )
 
-    # Pass every 1.6 seconds between nearby players on team A.
     receivers = [5, 6, 7, 10, 9, 8]
     pass_number = int(elapsed / 1.6)
     progress = (elapsed % 1.6) / 1.6
@@ -365,255 +717,7 @@ def _synthetic_frame(
         "ball": {
             "x": round(ball_x, 3),
             "y": round(ball_y, 3),
-            "bbox": _pixel_bbox(
-                ball_x, ball_y, width, height, ball=True
-            ),
+            "bbox": _pixel_bbox(ball_x, ball_y, width, height, ball=True),
             "conf": 0.0,
         },
-    }
-
-
-def analyze_video_segment(
-    video_path: str | Path,
-    start_time: float,
-    end_time: float,
-    cfg: M6Config | None = None,
-    output_dir: str | Path | None = None,
-    segment_id: str | None = None,
-) -> dict[str, Any]:
-    """Analyze a half-open video interval [start_time, end_time).
-
-    frame_idx is relative to int(start_time * fps), not the sampled-frame
-    sequence number. total_frames is the number of processed samples.
-
-    output_dir is reserved for M6 artifacts; JSON persistence is handled by
-    the server.
-    """
-    start_time = float(start_time)
-    end_time = float(end_time)
-    if (
-        not math.isfinite(start_time)
-        or not math.isfinite(end_time)
-        or start_time < 0
-        or end_time <= start_time
-    ):
-        raise ValueError("Require finite times with 0 <= start_time < end_time")
-
-    video_path = Path(video_path)
-    if not video_path.is_file():
-        raise FileNotFoundError(f"Video not found: {video_path}")
-
-    if output_dir is not None:
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-
-    if cfg is None:
-        try:
-            # If your project has a default-config loader, call it here.
-            cfg = M6Config()
-        except Exception:
-            logger.warning("Default M6 config unavailable; using demo defaults")
-            cfg = SimpleNamespace(
-                model_path="yolov8n.pt",
-                device="cpu",
-                conf_threshold=0.20,
-                imgsz=640,
-            )
-
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        cap.release()
-        raise ValueError("Video could not be opened")
-
-    frames: list[dict[str, Any]] = []
-    sample_metadata: list[tuple[int, int, int]] = []
-    synthetic = False
-    fallback_reason: str | None = None
-
-    try:
-        fps = float(cap.get(cv2.CAP_PROP_FPS))
-        fps_estimated = not math.isfinite(fps) or fps <= 0
-        if fps_estimated:
-            fps = 25.0
-
-        start_frame = int(start_time * fps)
-        end_frame = int(end_time * fps)
-        if end_frame <= start_frame:
-            raise ValueError("Segment contains no complete frame interval")
-
-        raw_frame_count = float(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if math.isfinite(raw_frame_count) and raw_frame_count > 0:
-            end_frame = min(end_frame, int(raw_frame_count))
-        if start_frame >= end_frame:
-            raise ValueError("Segment starts beyond the available video")
-
-        # Every other frame at >=25fps; increase stride for longer segments.
-        sample_rate = max(
-            2 if fps >= 25 else 1,
-            math.ceil((end_frame - start_frame) / MAX_ANALYSIS_FRAMES),
-        )
-
-        detector = tracker = ball_tracker = None
-
-        def enable_fallback(exc: Exception) -> None:
-            nonlocal synthetic, fallback_reason, frames
-            synthetic = True
-            fallback_reason = type(exc).__name__
-            logger.warning(
-                "M6 unavailable; using synthetic segment analysis",
-                exc_info=True,
-            )
-            # Regenerate previous samples to avoid mixing real and fake IDs.
-            frames = [
-                _synthetic_frame(idx, fps, start_time, width, height)
-                for idx, width, height in sample_metadata
-            ]
-
-        # Seek once; grab skipped frames without copying them into Python.
-        if start_frame:
-            if not cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame):
-                raise ValueError("Video backend could not seek to segment")
-
-        absolute_idx = start_frame
-        while absolute_idx < end_frame and len(frames) < MAX_ANALYSIS_FRAMES:
-            relative_idx = absolute_idx - start_frame
-
-            if relative_idx % sample_rate:
-                if not cap.grab():
-                    break
-                absolute_idx += 1
-                continue
-
-            ok, frame = cap.read()
-            if not ok:
-                break
-
-            height, width = frame.shape[:2]
-            sample_metadata.append((relative_idx, width, height))
-
-            if synthetic:
-                frames.append(
-                    _synthetic_frame(
-                        relative_idx, fps, start_time, width, height
-                    )
-                )
-            else:
-                try:
-                    # Lazy loading avoids downloading weights for empty input.
-                    if detector is None:
-                        detector, tracker, ball_tracker = (
-                            _make_segment_components(cfg)
-                        )
-
-                    detections = detector.detect(frame, relative_idx)
-                    player_tracks = tracker.update(
-                        [d for d in detections if d["kind"] == "player"],
-                        relative_idx,
-                        frame.shape,
-                    )
-
-                    ball_detections = [
-                        d for d in detections if d["kind"] == "ball"
-                    ]
-                    # Keep at most one ball observation.
-                    ball_detections = sorted(
-                        ball_detections,
-                        key=lambda d: d["conf"],
-                        reverse=True,
-                    )[:1]
-                    ball_tracks = ball_tracker.update(
-                        ball_detections, relative_idx, frame.shape
-                    )
-
-                    players = []
-                    for track in player_tracks:
-                        x1, y1, x2, y2 = track["bbox"]
-                        pitch_x, pitch_y = _pitch_point(
-                            (x1 + x2) / 2, y2, width, height
-                        )
-                        track_id = int(track["track_id"])
-                        team = (
-                            "referee"
-                            if track.get("label") == "referee"
-                            else ("A" if track_id % 2 else "B")
-                        )
-                        players.append(
-                            {
-                                "track_id": track_id,
-                                "team": team,
-                                "x": pitch_x,
-                                "y": pitch_y,
-                                "bbox": track["bbox"],
-                                "conf": float(track["conf"]),
-                            }
-                        )
-
-                    ball = None
-                    if ball_tracks:
-                        track = ball_tracks[0]
-                        x1, y1, x2, y2 = track["bbox"]
-                        pitch_x, pitch_y = _pitch_point(
-                            (x1 + x2) / 2,
-                            (y1 + y2) / 2,
-                            width,
-                            height,
-                        )
-                        ball = {
-                            "x": pitch_x,
-                            "y": pitch_y,
-                            "bbox": track["bbox"],
-                            "conf": float(track["conf"]),
-                        }
-
-                    frames.append(
-                        {
-                            "frame_idx": relative_idx,
-                            "timestamp": round(
-                                start_time + relative_idx / fps, 2
-                            ),
-                            "players": players,
-                            "ball": ball,
-                        }
-                    )
-                except Exception as exc:
-                    # Includes weight loading, inference, and tracker failures.
-                    # The current sample is already in sample_metadata.
-                    enable_fallback(exc)
-
-            absolute_idx += 1
-
-    finally:
-        cap.release()
-
-    if not frames:
-        raise ValueError("No readable frames in the requested segment")
-
-    unique_players = {
-        player["track_id"]
-        for frame in frames
-        for player in frame["players"]
-        if player["team"] != "referee"
-    }
-    ball_frames = sum(frame["ball"] is not None for frame in frames)
-
-    return {
-        "segment_id": segment_id or "segment",
-        "start_time": start_time,
-        "end_time": end_time,
-        "duration": round(end_time - start_time, 2),
-        "fps": fps,
-        "total_frames": len(frames),
-        "frames": frames,
-        "stats": {
-            "tracked_players_count": len(unique_players),
-            # Percentage in [0, 100]. Synthetic output is NOT detection.
-            "ball_detection_rate": (
-                0.0 if synthetic else round(100 * ball_frames / len(frames), 2)
-            ),
-            "ball_presence_rate": round(100 * ball_frames / len(frames), 2),
-        },
-        "synthetic": synthetic,
-        "fallback_reason": fallback_reason,
-        "sample_rate": sample_rate,
-        "fps_estimated": fps_estimated,
-        "coordinate_mapping": "normalized_video",
     }

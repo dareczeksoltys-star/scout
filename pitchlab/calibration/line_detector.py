@@ -230,7 +230,10 @@ def detect_line_segments(
     segments: List[Tuple[Tuple[int, int], Tuple[int, int]]] = []
     if lines is not None:
         for line in lines:
-            x1, y1, x2, y2 = line[0]
+            pts = line.reshape(-1)
+            if len(pts) < 4:
+                continue
+            x1, y1, x2, y2 = pts[:4]
             length = math.hypot(x2 - x1, y2 - y1)
             if length >= min_length:
                 segments.append(((int(x1), int(y1)), (int(x2), int(y2))))

@@ -35,6 +35,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "ultralytics>=8.0.0",
     "typer>=0.9.0",
+    "scikit-image>=0.21.0",
 ]
 
 [project.optional-dependencies]
